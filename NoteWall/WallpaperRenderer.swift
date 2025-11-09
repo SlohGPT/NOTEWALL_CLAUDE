@@ -7,6 +7,10 @@ struct WallpaperRenderer {
         backgroundColor: UIColor,
         backgroundImage: UIImage? = nil
     ) -> UIImage {
+        print("🎨 WallpaperRenderer: Generating wallpaper")
+        print("   Total notes: \(notes.count)")
+        print("   Background image: \(backgroundImage != nil ? "YES" : "NO")")
+        
         // iPhone wallpaper dimensions
         let width: CGFloat = 1290
         let height: CGFloat = 2796
@@ -21,16 +25,24 @@ struct WallpaperRenderer {
 
             if let image = backgroundImage {
                 drawBackground(image: image, in: canvasRect, on: context.cgContext)
+                print("   ✅ Drew background image")
             }
 
             // Filter out completed notes and limit to notes that fit
             let activeNotes = notes.filter { !$0.isCompleted }
             let notesToShow = limitNotesToSafeArea(activeNotes)
+            
+            print("   Active notes: \(activeNotes.count)")
+            print("   Notes to show: \(notesToShow.count)")
 
-            guard !notesToShow.isEmpty else { return }
+            guard !notesToShow.isEmpty else {
+                print("   ⚠️ NO NOTES TO SHOW - Wallpaper will be blank")
+                return
+            }
 
             // Prepare text
             let combinedText = notesToShow.map { $0.text }.joined(separator: "\n\n")
+            print("   📝 Combined text length: \(combinedText.count) chars")
 
             // Text attributes - white, left-aligned
             let paragraphStyle = NSMutableParagraphStyle()
@@ -43,6 +55,8 @@ struct WallpaperRenderer {
                 backgroundColor: backgroundColor,
                 backgroundImage: backgroundImage
             )
+            
+            print("   🎨 Text color: \(textColor == .white ? "WHITE" : "BLACK")")
 
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: fontSize, weight: .medium),
@@ -71,9 +85,12 @@ struct WallpaperRenderer {
                 width: textMaxWidth,
                 height: textSize.height
             )
+            
+            print("   📍 Text rect: x=\(horizontalPadding), y=\(topPadding), w=\(textMaxWidth), h=\(textSize.height)")
 
             // Draw text
             combinedText.draw(in: textRect, withAttributes: attributes)
+            print("   ✅ Drew text on wallpaper")
         }
     }
 

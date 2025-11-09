@@ -17,6 +17,16 @@ struct Note: Identifiable, Codable {
 extension Notification.Name {
     static let requestWallpaperUpdate = Notification.Name("requestWallpaperUpdate")
     static let wallpaperGenerationFinished = Notification.Name("wallpaperGenerationFinished")
+    static let onboardingReplayRequested = Notification.Name("onboardingReplayRequested")
+    static let shortcutWallpaperApplied = Notification.Name("shortcutWallpaperApplied")
+}
+
+struct WallpaperUpdateRequest {
+    let skipDeletionPrompt: Bool
+    
+    init(skipDeletionPrompt: Bool = false) {
+        self.skipDeletionPrompt = skipDeletionPrompt
+    }
 }
 
 enum LockScreenBackgroundOption: String, CaseIterable, Identifiable {

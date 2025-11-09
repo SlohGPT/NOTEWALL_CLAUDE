@@ -29,6 +29,7 @@ enum HomeScreenImageManager {
     private static let lockScreenFileName = "lockscreen.jpg"
     private static let homePresetBlackFileName = "home_preset_black.jpg"
     private static let homePresetGrayFileName = "home_preset_gray.jpg"
+    private static let presetIndicatorFileName = "preset_selection.txt"
     private static let legacyHomeScreenExtensions = ["png", "heic", "heif"]
 
     static var displayFolderPath: String {
@@ -68,6 +69,14 @@ enum HomeScreenImageManager {
         lockScreenDirectoryURL?.appendingPathComponent(lockScreenFileName, isDirectory: false)
     }
 
+    private static var homeScreenFileURLUnderscore: URL? {
+        homeScreenDirectoryURL?.appendingPathComponent("home_screen.jpg", isDirectory: false)
+    }
+
+    private static var lockScreenFileURLUnderscore: URL? {
+        lockScreenDirectoryURL?.appendingPathComponent("lock_screen.jpg", isDirectory: false)
+    }
+
     private static var editorBackgroundFileURL: URL? {
         editorDirectoryURL?.appendingPathComponent(editorBackgroundFileName, isDirectory: false)
     }
@@ -78,6 +87,18 @@ enum HomeScreenImageManager {
 
     private static var homePresetGrayURL: URL? {
         baseDirectoryURL?.appendingPathComponent(homePresetGrayFileName, isDirectory: false)
+    }
+
+    private static var editorHomePresetBlackURL: URL? {
+        editorDirectoryURL?.appendingPathComponent(homePresetBlackFileName, isDirectory: false)
+    }
+
+    private static var editorHomePresetGrayURL: URL? {
+        editorDirectoryURL?.appendingPathComponent(homePresetGrayFileName, isDirectory: false)
+    }
+
+    private static var presetIndicatorURL: URL? {
+        editorDirectoryURL?.appendingPathComponent(presetIndicatorFileName, isDirectory: false)
     }
 
     private static func ensureDirectoryExists(at url: URL) throws {
@@ -174,6 +195,9 @@ enum HomeScreenImageManager {
         }
 
         try data.write(to: destinationURL, options: .atomic)
+        if let aliasURL = homeScreenFileURLUnderscore {
+            try? data.write(to: aliasURL, options: .atomic)
+        }
     }
 
     static func saveLockScreenWallpaper(_ image: UIImage) throws {
@@ -197,6 +221,9 @@ enum HomeScreenImageManager {
         }
 
         try data.write(to: destinationURL, options: .atomic)
+        if let aliasURL = lockScreenFileURLUnderscore {
+            try? data.write(to: aliasURL, options: .atomic)
+        }
     }
 
     static func saveLockScreenBackgroundSource(_ image: UIImage) throws {
@@ -302,6 +329,67 @@ enum HomeScreenImageManager {
         }
         let image = solidColorImage(color: LockScreenBackgroundOption.gray.uiColor)
         try? saveHomePresetGray(image)
+        return image
+    }
+
+    // MARK: - TextEditor Preset Management
+
+    static func saveEditorHomePresetBlack(_ image: UIImage) throws {
+        try savePresetImage(image, at: editorHomePresetBlackURL)
+        try savePresetIndicator("black")
+    }
+
+    static func saveEditorHomePresetGray(_ image: UIImage) throws {
+        try savePresetImage(image, at: editorHomePresetGrayURL)
+        try savePresetIndicator("gray")
+    }
+
+    static func savePresetIndicator(_ presetName: String) throws {
+        guard
+            let baseURL = baseDirectoryURL,
+            let directoryURL = editorDirectoryURL,
+            let indicatorURL = presetIndicatorURL
+        else {
+            throw HomeScreenImageManagerError.documentsDirectoryUnavailable
+        }
+
+        do {
+            try ensureDirectoryExists(at: baseURL)
+            try ensureDirectoryExists(at: directoryURL)
+        } catch {
+            throw HomeScreenImageManagerError.unableToCreateDirectory
+        }
+
+        try presetName.write(to: indicatorURL, atomically: true, encoding: .utf8)
+    }
+
+    static func getCurrentPresetSelection() -> String? {
+        guard let indicatorURL = presetIndicatorURL,
+              FileManager.default.fileExists(atPath: indicatorURL.path) else {
+            return nil
+        }
+        return try? String(contentsOf: indicatorURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func editorHomePresetBlackImage() -> UIImage? {
+        if let url = editorHomePresetBlackURL,
+           FileManager.default.fileExists(atPath: url.path),
+           let image = UIImage(contentsOfFile: url.path) {
+            return image
+        }
+        let image = solidColorImage(color: LockScreenBackgroundOption.black.uiColor)
+        try? saveEditorHomePresetBlack(image)
+        return image
+    }
+
+    static func editorHomePresetGrayImage() -> UIImage? {
+        if let url = editorHomePresetGrayURL,
+           FileManager.default.fileExists(atPath: url.path),
+           let image = UIImage(contentsOfFile: url.path) {
+            return image
+        }
+        let image = solidColorImage(color: LockScreenBackgroundOption.gray.uiColor)
+        try? saveEditorHomePresetGray(image)
         return image
     }
 

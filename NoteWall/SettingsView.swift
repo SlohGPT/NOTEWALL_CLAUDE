@@ -9,12 +9,14 @@ struct SettingsView: View {
     @AppStorage("lockScreenBackground") private var lockScreenBackgroundRaw = LockScreenBackgroundOption.default.rawValue
     @AppStorage("lockScreenBackgroundMode") private var lockScreenBackgroundModeRaw = LockScreenBackgroundMode.default.rawValue
     @AppStorage("lockScreenBackgroundPhotoData") private var lockScreenBackgroundPhotoData: Data = Data()
+    @AppStorage("hasCompletedSetup") private var hasCompletedSetup = false
+    @AppStorage("completedOnboardingVersion") private var completedOnboardingVersion = 0
+    @AppStorage("homeScreenUsesCustomPhoto") private var homeScreenUsesCustomPhoto = false
     @State private var showDeleteAlert = false
+    @State private var showResetAlert = false
     var selectedTab: Binding<Int>?
 
-    private let shortcutURL = "https://www.icloud.com/shortcuts/62d89adfc4074e22acb0b58b11850ea4"
-    private let appVersion = "1.0"
-    
+    private let shortcutURL = "https://www.icloud.com/shortcuts/a00482ed7b054ee0b42d7d9a7796c7eb"
     init(selectedTab: Binding<Int>? = nil) {
         self.selectedTab = selectedTab
     }
@@ -23,7 +25,6 @@ struct SettingsView: View {
     @State private var isSavingHomeScreenPhoto = false
     @State private var homeScreenStatusMessage: String?
     @State private var homeScreenStatusColor: Color = .gray
-    @State private var homeScreenImageAvailable = HomeScreenImageManager.homeScreenImageExists()
     @State private var isSavingLockScreenBackground = false
     @State private var lockScreenBackgroundStatusMessage: String?
     @State private var lockScreenBackgroundStatusColor: Color = .gray
@@ -42,6 +43,14 @@ struct SettingsView: View {
                 } message: {
                     Text("This action cannot be undone. All your notes will be permanently deleted.")
                 }
+                .alert("Reset to Fresh Install?", isPresented: $showResetAlert) {
+                    Button("Cancel", role: .cancel) { }
+                    Button("Reset Everything", role: .destructive) {
+                        resetToFreshInstall()
+                    }
+                } message: {
+                    Text("This will delete ALL app data including notes, wallpapers, settings, and onboarding progress. The app will restart as if you just installed it for the first time.")
+                }
         }
         .navigationViewStyle(StackNavigationViewStyle())
     }
@@ -49,31 +58,10 @@ struct SettingsView: View {
     @ViewBuilder
     private var settingsList: some View {
         List {
-            appInfoSection
-            wallpaperSettingsSection
             homeScreenSection
             actionsSection
+            wallpaperSettingsSection
             supportSection
-        }
-    }
-
-    private var appInfoSection: some View {
-        Section(header: Text("App Info")) {
-            HStack {
-                Text("Version")
-                Spacer()
-                Text(appVersion)
-                    .foregroundColor(.gray)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("About App")
-                    .fontWeight(.medium)
-                Text("NoteWall converts your text notes into black wallpaper images with white centered text. Create notes, generate wallpapers, and set them via Shortcuts.")
-                    .font(.caption)
-                    .foregroundColor(.gray)
-            }
-            .padding(.vertical, 4)
         }
     }
 
@@ -98,7 +86,10 @@ struct SettingsView: View {
                     isSavingHomeScreenPhoto: $isSavingHomeScreenPhoto,
                     homeScreenStatusMessage: $homeScreenStatusMessage,
                     homeScreenStatusColor: $homeScreenStatusColor,
-                    homeScreenImageAvailable: $homeScreenImageAvailable,
+                    homeScreenImageAvailable: Binding(
+                        get: { homeScreenUsesCustomPhoto },
+                        set: { homeScreenUsesCustomPhoto = $0 }
+                    ),
                     handlePickedHomeScreenData: handlePickedHomeScreenData
                 )
                 .listRowSeparator(.hidden)
@@ -107,6 +98,10 @@ struct SettingsView: View {
                     isSavingHomeScreenPhoto: $isSavingHomeScreenPhoto,
                     homeScreenStatusMessage: $homeScreenStatusMessage,
                     homeScreenStatusColor: $homeScreenStatusColor,
+                    homeScreenImageAvailable: Binding(
+                        get: { homeScreenUsesCustomPhoto },
+                        set: { homeScreenUsesCustomPhoto = $0 }
+                    ),
                     handlePickedHomeScreenData: handlePickedHomeScreenData
                 )
 
@@ -134,6 +129,7 @@ struct SettingsView: View {
                     .listRowSeparator(.hidden)
                     .padding(.top, 8)
             }
+            .onAppear(perform: ensureCustomHomePhotoFlagIsAccurate)
         } else {
             Section(header: Text("Home Screen Photo")) {
                 Text("Save a home screen image requires iOS 16 or newer.")
@@ -141,11 +137,33 @@ struct SettingsView: View {
                     .foregroundColor(.gray)
                     .padding(.vertical, 4)
             }
+            .onAppear(perform: ensureCustomHomePhotoFlagIsAccurate)
         }
     }
 
     private var actionsSection: some View {
         Section(header: Text("Actions")) {
+            Button(action: {
+                showResetAlert = true
+            }) {
+                HStack {
+                    Text("Reset to Fresh Install")
+                        .foregroundColor(.orange)
+                    Spacer()
+                    Image(systemName: "arrow.counterclockwise.circle")
+                        .foregroundColor(.orange)
+                }
+            }
+            
+            Button(action: resetOnboarding) {
+                HStack {
+                    Text("Replay Welcome Flow")
+                    Spacer()
+                    Image(systemName: "sparkles")
+                        .foregroundColor(.appAccent)
+                }
+            }
+
             Button(action: {
                 showDeleteAlert = true
             }) {
@@ -153,6 +171,8 @@ struct SettingsView: View {
                     Text("Delete All Notes")
                         .foregroundColor(.red)
                     Spacer()
+                    Image(systemName: "trash")
+                        .foregroundColor(.red)
                 }
             }
 
@@ -193,6 +213,60 @@ struct SettingsView: View {
         UIApplication.shared.open(url)
     }
 
+    private func resetOnboarding() {
+        hasCompletedSetup = false
+        completedOnboardingVersion = 0
+        NotificationCenter.default.post(name: .onboardingReplayRequested, object: nil)
+    }
+    
+    private func resetToFreshInstall() {
+        print("🔄 RESETTING APP TO FRESH INSTALL STATE")
+        
+        // 1. Clear all AppStorage values
+        savedNotesData = Data()
+        skipDeletingOldWallpaper = false
+        lockScreenBackgroundRaw = LockScreenBackgroundOption.default.rawValue
+        lockScreenBackgroundModeRaw = LockScreenBackgroundMode.default.rawValue
+        lockScreenBackgroundPhotoData = Data()
+        hasCompletedSetup = false
+        completedOnboardingVersion = 0
+        homeScreenUsesCustomPhoto = false
+        homeScreenPresetSelectionRaw = ""
+        
+        // Clear other AppStorage keys that might exist
+        UserDefaults.standard.removeObject(forKey: "lastLockScreenIdentifier")
+        UserDefaults.standard.removeObject(forKey: "hasCompletedInitialWallpaperSetup")
+        
+        print("✅ Cleared all AppStorage data")
+        
+        // 2. Delete all files from Documents/NoteWall directory
+        if let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let noteWallURL = documentsURL.appendingPathComponent("NoteWall", isDirectory: true)
+            
+            if FileManager.default.fileExists(atPath: noteWallURL.path) {
+                do {
+                    try FileManager.default.removeItem(at: noteWallURL)
+                    print("✅ Deleted all wallpaper files")
+                } catch {
+                    print("❌ Error deleting files: \(error)")
+                }
+            }
+        }
+        
+        print("🎉 Reset complete! App is now in fresh install state.")
+        print("   Triggering onboarding...")
+        
+        // 3. Trigger onboarding
+        NotificationCenter.default.post(name: .onboardingReplayRequested, object: nil)
+        
+        // 4. Switch to Home tab
+        if let selectedTab = selectedTab {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                selectedTab.wrappedValue = 0
+            }
+        }
+    }
+
     @available(iOS 16.0, *)
     fileprivate func handlePickedHomeScreenData(_ data: Data) {
         isSavingHomeScreenPhoto = true
@@ -207,13 +281,9 @@ struct SettingsView: View {
                 try HomeScreenImageManager.saveHomeScreenImage(image)
 
                 await MainActor.run {
-                    homeScreenImageAvailable = true
-                    homeScreenStatusMessage = "Saved!"
-                    homeScreenStatusColor = .green
-                    lockScreenBackgroundPhotoData = data
-                    lockScreenBackgroundModeRaw = LockScreenBackgroundMode.photo.rawValue
-                    lockScreenBackgroundStatusMessage = "Using selected photo."
-                    lockScreenBackgroundStatusColor = .green
+                    homeScreenUsesCustomPhoto = true
+                    homeScreenStatusMessage = nil
+                    homeScreenStatusColor = .gray
                     homeScreenPresetSelectionRaw = ""
                 }
             } catch {
@@ -264,15 +334,33 @@ private struct UpdateWallpaperButton: View {
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperGenerationFinished)) { _ in
             isGenerating = false
         }
+        .onReceive(NotificationCenter.default.publisher(for: .shortcutWallpaperApplied)) { _ in
+            isGenerating = false
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                isGenerating = false
+            }
+        }
     }
 
     private func triggerUpdate() {
         guard !isGenerating else { return }
         isGenerating = true
+        // Show deletion prompt to allow users to clean up old wallpapers
         NotificationCenter.default.post(name: .requestWallpaperUpdate, object: nil)
     }
 }
 
 #Preview {
     SettingsView()
+}
+
+private extension SettingsView {
+    func ensureCustomHomePhotoFlagIsAccurate() {
+        let shouldBeEnabled = homeScreenPresetSelectionRaw.isEmpty && HomeScreenImageManager.homeScreenImageExists()
+        if homeScreenUsesCustomPhoto != shouldBeEnabled {
+            homeScreenUsesCustomPhoto = shouldBeEnabled
+        }
+    }
 }

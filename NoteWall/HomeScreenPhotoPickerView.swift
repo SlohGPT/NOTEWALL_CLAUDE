@@ -13,16 +13,18 @@ struct HomeScreenPhotoPickerView: View {
 
     @State private var showSourceOptions = false
     @State private var activePicker: PickerType?
+    @State private var isPhotoLibraryPickerPresented = false
+    @State private var photoLibrarySelection: PhotosPickerItem?
+    @State private var isHomeIconActive = false
+    @State private var hasActivatedHomeThisSession = false
 
     private enum PickerType: Identifiable {
         case camera
-        case photoLibrary
         case files
 
         var id: String {
             switch self {
             case .camera: return "camera"
-            case .photoLibrary: return "photoLibrary"
             case .files: return "files"
             }
         }
@@ -34,7 +36,7 @@ struct HomeScreenPhotoPickerView: View {
                 HStack(spacing: 12) {
                     Image(systemName: homeScreenImageAvailable ? "photo.fill" : "photo")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(homeScreenImageAvailable ? .appAccent : .secondary)
+                        .foregroundColor(isHomeIconActive ? .appAccent : .gray)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(homeScreenImageAvailable ? "Home Screen Photo" : "Add Home Screen Photo")
@@ -71,7 +73,8 @@ struct HomeScreenPhotoPickerView: View {
             titleVisibility: .hidden
         ) {
             Button(role: .none) {
-                activePicker = .photoLibrary
+                isPhotoLibraryPickerPresented = true
+                showSourceOptions = false
             } label: {
                 Label("Photo Library", systemImage: "photo.on.rectangle")
                     .labelStyle(LeadingMenuLabelStyle())
@@ -79,6 +82,7 @@ struct HomeScreenPhotoPickerView: View {
 
             if UIImagePickerController.isSourceTypeAvailable(.camera) {
                 Button(role: .none) {
+                    showSourceOptions = false
                     activePicker = .camera
                 } label: {
                     Label("Take Photo", systemImage: "camera")
@@ -87,6 +91,7 @@ struct HomeScreenPhotoPickerView: View {
             }
 
             Button(role: .none) {
+                showSourceOptions = false
                 activePicker = .files
             } label: {
                 Label("Choose File", systemImage: "folder")
@@ -95,43 +100,68 @@ struct HomeScreenPhotoPickerView: View {
 
             Button("Cancel", role: .cancel) { }
         }
+        .photosPicker(
+            isPresented: $isPhotoLibraryPickerPresented,
+            selection: $photoLibrarySelection,
+            matching: .images
+        )
+        .onChange(of: photoLibrarySelection) { newValue in
+            guard let item = newValue else { return }
+            Task {
+                do {
+                    if let data = try await item.loadTransferable(type: Data.self) {
+                        await MainActor.run {
+                            processPickedData(data)
+                        }
+                    } else {
+                        await MainActor.run {
+                            reportLoadFailure("Unable to load selected photo.")
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        reportLoadFailure("Unable to load selected photo.")
+                    }
+                }
+
+                await MainActor.run {
+                    photoLibrarySelection = nil
+                    isPhotoLibraryPickerPresented = false
+                }
+            }
+        }
+        .onChange(of: homeScreenImageAvailable) { _ in
+            syncHomeIconState()
+        }
         .sheet(item: $activePicker) { picker in
             switch picker {
             case .camera:
                 CameraPickerView { image in
                     guard let data = image.jpegData(compressionQuality: 0.95) ?? image.pngData() else {
                         reportLoadFailure("Unable to process captured photo.")
-                        activePicker = nil
                         return
                     }
                     processPickedData(data)
-                    activePicker = nil
                 } onCancel: {
                     activePicker = nil
-                }
-
-            case .photoLibrary:
-                PhotoLibraryPickerView { data in
-                    processPickedData(data)
-                    activePicker = nil
-                } onError: { message in
-                    reportLoadFailure(message)
-                    activePicker = nil
-                } onCancel: {
+                } onDismiss: {
                     activePicker = nil
                 }
 
             case .files:
                 DocumentPickerView { data in
                     processPickedData(data)
-                    activePicker = nil
                 } onError: { message in
                     reportLoadFailure(message)
-                    activePicker = nil
                 } onCancel: {
+                    activePicker = nil
+                } onDismiss: {
                     activePicker = nil
                 }
             }
+        }
+        .onAppear {
+            syncHomeIconState()
         }
     }
 
@@ -140,15 +170,29 @@ struct HomeScreenPhotoPickerView: View {
             homeScreenStatusMessage = message
             homeScreenStatusColor = .red
             isSavingHomeScreenPhoto = false
+            isHomeIconActive = false
+            hasActivatedHomeThisSession = false
         }
     }
 
     private func processPickedData(_ data: Data) {
+        print("📸 HomeScreenPhotoPickerView: Processing picked photo data")
         DispatchQueue.main.async {
             handlePickedHomeScreenData(data)
+            hasActivatedHomeThisSession = true
+            print("✅ HomeScreenPhotoPickerView: Photo data processed successfully")
         }
     }
 
+    private func syncHomeIconState() {
+        if homeScreenImageAvailable {
+            isHomeIconActive = true
+            hasActivatedHomeThisSession = true
+        } else {
+            isHomeIconActive = false
+            hasActivatedHomeThisSession = false
+        }
+    }
 }
 
 @available(iOS 16.0, *)
@@ -158,6 +202,7 @@ struct HomeScreenQuickPresetsView: View {
     @Binding var isSavingHomeScreenPhoto: Bool
     @Binding var homeScreenStatusMessage: String?
     @Binding var homeScreenStatusColor: Color
+    @Binding var homeScreenImageAvailable: Bool
 
     let handlePickedHomeScreenData: (Data) -> Void
 
@@ -199,19 +244,20 @@ struct HomeScreenQuickPresetsView: View {
         let image = solidColorImage(color: preset.lockScreenOption.uiColor)
 
         do {
+            // SIMPLE: Just save to HomeScreen folder
+            // This is what the shortcut will read, whether it's a preset or custom photo
             try HomeScreenImageManager.saveHomeScreenImage(image)
-            switch preset {
-            case .black:
-                try? HomeScreenImageManager.saveHomePresetBlack(image)
-            case .gray:
-                try? HomeScreenImageManager.saveHomePresetGray(image)
-            }
+            
+            print("✅ Saved \(preset.title) preset to HomeScreen folder")
+            print("   Path: HomeScreen/homescreen.jpg")
 
             homeScreenPresetSelectionRaw = preset.rawValue
-            homeScreenStatusMessage = "\(preset.title) preset saved."
-            homeScreenStatusColor = .green
+            homeScreenImageAvailable = false
+            homeScreenStatusMessage = nil
+            homeScreenStatusColor = .gray
             isSavingHomeScreenPhoto = false
         } catch {
+            print("❌ Failed to save preset: \(error)")
             reportLoadFailure("Failed to save \(preset.title.lowercased()) preset.")
         }
     }
@@ -292,16 +338,18 @@ struct LockScreenBackgroundPickerView: View {
 
     @State private var showSourceOptions = false
     @State private var activePicker: PickerType?
+    @State private var isLockIconActive = false
+    @State private var hasActivatedLockThisSession = false
+    @State private var isPhotoLibraryPickerPresented = false
+    @State private var photoLibrarySelection: PhotosPickerItem?
 
     private enum PickerType: Identifiable {
         case camera
-        case photoLibrary
         case files
 
         var id: String {
             switch self {
             case .camera: return "camera"
-            case .photoLibrary: return "photoLibrary"
             case .files: return "files"
             }
         }
@@ -319,9 +367,9 @@ struct LockScreenBackgroundPickerView: View {
         VStack(alignment: .leading, spacing: 6) {
             Button(action: { showSourceOptions = true }) {
                 HStack(spacing: 12) {
-                    Image(systemName: backgroundMode == .photo && backgroundPhotoAvailable ? "photo.fill" : "photo")
+                    Image(systemName: backgroundMode == .photo && (!backgroundPhotoData.isEmpty || backgroundPhotoAvailable) ? "photo.fill" : "photo")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(backgroundMode == .photo && backgroundPhotoAvailable ? .appAccent : .secondary)
+                        .foregroundColor(isLockIconActive ? .appAccent : .gray)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Lock Screen Background")
@@ -359,13 +407,15 @@ struct LockScreenBackgroundPickerView: View {
             )
         }
         .animation(.spring(response: 0.25, dampingFraction: 0.85), value: backgroundMode)
+        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: isLockIconActive)
         .confirmationDialog(
             "",
             isPresented: $showSourceOptions,
             titleVisibility: .hidden
         ) {
             Button(role: .none) {
-                activePicker = .photoLibrary
+                isPhotoLibraryPickerPresented = true
+                showSourceOptions = false
             } label: {
                 Label("Photo Library", systemImage: "photo.on.rectangle")
                     .labelStyle(LeadingMenuLabelStyle())
@@ -373,6 +423,7 @@ struct LockScreenBackgroundPickerView: View {
 
             if UIImagePickerController.isSourceTypeAvailable(.camera) {
                 Button(role: .none) {
+                    showSourceOptions = false
                     activePicker = .camera
                 } label: {
                     Label("Take Photo", systemImage: "camera")
@@ -381,6 +432,7 @@ struct LockScreenBackgroundPickerView: View {
             }
 
             Button(role: .none) {
+                showSourceOptions = false
                 activePicker = .files
             } label: {
                 Label("Choose File", systemImage: "folder")
@@ -389,43 +441,71 @@ struct LockScreenBackgroundPickerView: View {
 
             Button("Cancel", role: .cancel) { }
         }
+        .photosPicker(
+            isPresented: $isPhotoLibraryPickerPresented,
+            selection: $photoLibrarySelection,
+            matching: .images
+        )
+        .onChange(of: photoLibrarySelection) { newValue in
+            guard let item = newValue else { return }
+            Task {
+                do {
+                    if let data = try await item.loadTransferable(type: Data.self) {
+                        await MainActor.run {
+                            processPickedData(data)
+                        }
+                    } else {
+                        await MainActor.run {
+                            reportFailure("Unable to load selected photo.")
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        reportFailure("Unable to load selected photo.")
+                    }
+                }
+
+                await MainActor.run {
+                    photoLibrarySelection = nil
+                    isPhotoLibraryPickerPresented = false
+                }
+            }
+        }
+        .onChange(of: backgroundMode) { _ in
+            syncLockIconState()
+        }
+        .onChange(of: backgroundPhotoData) { _ in
+            syncLockIconState()
+        }
         .sheet(item: $activePicker) { picker in
             switch picker {
             case .camera:
                 CameraPickerView { image in
                     guard let data = image.jpegData(compressionQuality: 0.95) ?? image.pngData() else {
                         reportFailure("Unable to process captured photo.")
-                        activePicker = nil
                         return
                     }
                     processPickedData(data)
-                    activePicker = nil
                 } onCancel: {
                     activePicker = nil
-                }
-
-            case .photoLibrary:
-                PhotoLibraryPickerView { data in
-                    processPickedData(data)
-                    activePicker = nil
-                } onError: { message in
-                    reportFailure(message)
-                    activePicker = nil
-                } onCancel: {
+                } onDismiss: {
                     activePicker = nil
                 }
 
             case .files:
                 DocumentPickerView { data in
                     processPickedData(data)
-                    activePicker = nil
                 } onError: { message in
                     reportFailure(message)
-                    activePicker = nil
                 } onCancel: {
+                    activePicker = nil
+                } onDismiss: {
                     activePicker = nil
                 }
             }
+        }
+        .onAppear {
+            syncLockIconState()
         }
     }
 
@@ -433,40 +513,108 @@ struct LockScreenBackgroundPickerView: View {
         statusMessage = message
         statusColor = .red
         isSavingBackground = false
+        isLockIconActive = false
+        hasActivatedLockThisSession = false
     }
 
     private func processPickedData(_ data: Data) {
+        print("📸 LockScreenBackgroundPickerView: Processing picked photo data")
+        print("   Data size: \(data.count) bytes")
         isSavingBackground = true
         statusMessage = "Saving background…"
         statusColor = .secondary
 
         Task {
-            if let image = UIImage(data: data),
-               let prepared = Self.preparedBackgroundImage(from: image) {
-                try? HomeScreenImageManager.saveLockScreenBackgroundSource(prepared.image)
+            do {
+                guard let image = UIImage(data: data) else {
+                    throw HomeScreenImageManagerError.unableToEncodeImage
+                }
+                print("   Image size: \(image.size)")
+                
+                guard let prepared = Self.preparedBackgroundImage(from: image) else {
+                    throw HomeScreenImageManagerError.unableToEncodeImage
+                }
+                print("   Prepared image size: \(prepared.image.size)")
+                
+                // Save to file system for wallpaper generation
+                try HomeScreenImageManager.saveLockScreenBackgroundSource(prepared.image)
+                print("✅ Saved lock screen background to TextEditor folder")
+                
+                if let url = HomeScreenImageManager.lockScreenBackgroundSourceURL() {
+                    print("   File path: \(url.path)")
+                    print("   File exists: \(FileManager.default.fileExists(atPath: url.path))")
+                }
+                
                 await MainActor.run {
+                    // Set photo data and mode
                     backgroundPhotoData = prepared.data
                     backgroundMode = .photo
+                    backgroundOption = .black // Set a default option when using photo
+                    
+                    // Update UI state
                     isSavingBackground = false
-                    statusMessage = "Background photo saved!"
-                    statusColor = .green
+                    statusMessage = nil
+                    statusColor = .gray
+                    
+                    // Activate the icon to show cyan color
+                    isLockIconActive = true
+                    hasActivatedLockThisSession = true
+                    
+                    print("✅ LockScreenBackgroundPickerView: Photo data processed successfully")
+                    print("   Mode set to: .photo")
+                    print("   Photo data bytes: \(backgroundPhotoData.count)")
+                    print("   Icon activated: true")
                 }
-            } else {
+            } catch {
+                print("❌ LockScreenBackgroundPickerView: Failed to save photo: \(error)")
                 await MainActor.run {
-                    reportFailure("Unable to use selected photo.")
+                    reportFailure("Unable to save selected photo: \(error.localizedDescription)")
+                    isSavingBackground = false
                 }
             }
         }
     }
 
     private func selectPreset(_ preset: PresetOption) {
+        print("🎨 LockScreenBackgroundPickerView: Selecting preset \(preset.title)")
+        
         isSavingBackground = false
+        statusMessage = nil
+        statusColor = .gray
+        
+        // Clear photo data and file system storage
+        print("   Clearing photo data and removing background file...")
         backgroundPhotoData = Data()
+        HomeScreenImageManager.removeLockScreenBackgroundSource()
+        
+        // Set the preset mode and option
         backgroundOption = preset.lockScreenOption
         backgroundMode = LockScreenBackgroundMode.preset(for: preset.lockScreenOption)
-        statusMessage = "\(preset.title) preset selected."
-        statusColor = .green
-        HomeScreenImageManager.removeLockScreenBackgroundSource()
+        
+        print("   ✅ Preset selected")
+        print("      Background option: \(backgroundOption)")
+        print("      Background mode: \(backgroundMode)")
+        print("   ℹ️  User must click 'Update Wallpaper Now' to apply")
+        
+        // Update icon state
+        isLockIconActive = false
+        hasActivatedLockThisSession = false
+        
+        // Don't trigger automatic update - let user click "Update Wallpaper Now" button
+        // This matches the Home Screen preset behavior
+    }
+
+    private func syncLockIconState() {
+        let shouldActivate = backgroundMode == .photo && !backgroundPhotoData.isEmpty
+        print("🔄 LockScreenBackgroundPickerView: syncLockIconState -> mode=\(backgroundMode), photoDataEmpty=\(backgroundPhotoData.isEmpty)")
+        if shouldActivate {
+            isLockIconActive = true
+            hasActivatedLockThisSession = true
+        } else {
+            isLockIconActive = false
+            hasActivatedLockThisSession = false
+        }
+        print("   Icon active: \(isLockIconActive)")
     }
 
     private static func preparedBackgroundImage(from image: UIImage) -> (image: UIImage, data: Data)? {
@@ -578,9 +726,10 @@ struct LockScreenBackgroundPickerView: View {
 private struct CameraPickerView: UIViewControllerRepresentable {
     let onImagePicked: (UIImage) -> Void
     let onCancel: () -> Void
+    let onDismiss: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onImagePicked: onImagePicked, onCancel: onCancel)
+        Coordinator(onImagePicked: onImagePicked, onCancel: onCancel, onDismiss: onDismiss)
     }
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
@@ -596,10 +745,12 @@ private struct CameraPickerView: UIViewControllerRepresentable {
     final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
         private let onImagePicked: (UIImage) -> Void
         private let onCancel: () -> Void
+        private let onDismiss: () -> Void
 
-        init(onImagePicked: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) {
+        init(onImagePicked: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void, onDismiss: @escaping () -> Void) {
             self.onImagePicked = onImagePicked
             self.onCancel = onCancel
+            self.onDismiss = onDismiss
         }
 
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
@@ -608,74 +759,21 @@ private struct CameraPickerView: UIViewControllerRepresentable {
             } else {
                 onCancel()
             }
-            picker.dismiss(animated: true)
+            picker.dismiss(animated: true) {
+                self.onDismiss()
+            }
         }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             onCancel()
-            picker.dismiss(animated: true)
+            picker.dismiss(animated: true) {
+                self.onDismiss()
+            }
         }
     }
 }
 
 // MARK: - Photo Library Picker
-
-@available(iOS 16.0, *)
-private struct PhotoLibraryPickerView: UIViewControllerRepresentable {
-    let onPick: (Data) -> Void
-    let onError: (String) -> Void
-    let onCancel: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onPick: onPick, onError: onError, onCancel: onCancel)
-    }
-
-    func makeUIViewController(context: Context) -> PHPickerViewController {
-        var configuration = PHPickerConfiguration(photoLibrary: .shared())
-        configuration.filter = .images
-        configuration.selectionLimit = 1
-
-        let picker = PHPickerViewController(configuration: configuration)
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) { }
-
-    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        private let onPick: (Data) -> Void
-        private let onError: (String) -> Void
-        private let onCancel: () -> Void
-
-        init(onPick: @escaping (Data) -> Void, onError: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
-            self.onPick = onPick
-            self.onError = onError
-            self.onCancel = onCancel
-        }
-
-        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            guard let provider = results.first?.itemProvider else {
-                onCancel()
-                picker.dismiss(animated: true)
-                return
-            }
-
-            let typeIdentifier = UTType.image.identifier
-
-            provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, error in
-                DispatchQueue.main.async {
-                    if let data, !data.isEmpty {
-                        self.onPick(data)
-                    } else {
-                        self.onError("Unable to load selected photo.")
-                    }
-                }
-            }
-
-            picker.dismiss(animated: true)
-        }
-    }
-}
 
 // MARK: - Document Picker
 
@@ -684,9 +782,10 @@ private struct DocumentPickerView: UIViewControllerRepresentable {
     let onPick: (Data) -> Void
     let onError: (String) -> Void
     let onCancel: () -> Void
+    let onDismiss: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onPick: onPick, onError: onError, onCancel: onCancel)
+        Coordinator(onPick: onPick, onError: onError, onCancel: onCancel, onDismiss: onDismiss)
     }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
@@ -702,11 +801,13 @@ private struct DocumentPickerView: UIViewControllerRepresentable {
         private let onPick: (Data) -> Void
         private let onError: (String) -> Void
         private let onCancel: () -> Void
+        private let onDismiss: () -> Void
 
-        init(onPick: @escaping (Data) -> Void, onError: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+        init(onPick: @escaping (Data) -> Void, onError: @escaping (String) -> Void, onCancel: @escaping () -> Void, onDismiss: @escaping () -> Void) {
             self.onPick = onPick
             self.onError = onError
             self.onCancel = onCancel
+            self.onDismiss = onDismiss
         }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
@@ -714,6 +815,7 @@ private struct DocumentPickerView: UIViewControllerRepresentable {
                 DispatchQueue.main.async {
                     self.onError("No file selected.")
                     self.onCancel()
+                    self.onDismiss()
                 }
                 return
             }
@@ -722,10 +824,12 @@ private struct DocumentPickerView: UIViewControllerRepresentable {
                 let data = try Data(contentsOf: url)
                 DispatchQueue.main.async {
                     self.onPick(data)
+                    self.onDismiss()
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.onError("Unable to read selected file.")
+                    self.onDismiss()
                 }
             }
         }
@@ -733,6 +837,7 @@ private struct DocumentPickerView: UIViewControllerRepresentable {
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
             DispatchQueue.main.async {
                 self.onCancel()
+                self.onDismiss()
             }
         }
     }

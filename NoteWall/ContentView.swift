@@ -10,18 +10,18 @@ struct ContentView: View {
     @AppStorage("lockScreenBackgroundMode") private var lockScreenBackgroundModeRaw = LockScreenBackgroundMode.default.rawValue
     @AppStorage("lockScreenBackgroundPhotoData") private var lockScreenBackgroundPhotoData: Data = Data()
     @AppStorage("homeScreenPresetSelection") private var homeScreenPresetSelectionRaw = ""
-    @State private var notes: [Note] = []
+    @AppStorage("hasCompletedInitialWallpaperSetup") private var hasCompletedInitialWallpaperSetup = false
+    @AppStorage("hasCompletedSetup") private var hasCompletedSetup = false
+    @State private var notes: [Note]
     @State private var newNoteText = ""
     @State private var isGeneratingWallpaper = false
-    @State private var showDeletePermissionAlert = false
     @State private var pendingLockScreenImage: UIImage?
-    @State private var showDeleteNoteAlert = false
     @State private var notePendingDeletion: Note?
     @State private var pendingDeletionIndex: Int?
-    @State private var showMaxNotesAlert = false
+    @State private var activeAlert: ActiveAlert?
     @State private var isEditMode = false
     @State private var selectedNotes: Set<UUID> = []
-    @State private var showDeleteSelectedAlert = false
+    @State private var shouldSkipDeletionPrompt = false
     @FocusState private var isTextFieldFocused: Bool
 
     // Computed property to get indices of notes that will appear on wallpaper
@@ -56,229 +56,96 @@ struct ContentView: View {
     }
 
     private var lockScreenBackgroundColor: UIColor {
-        (lockScreenBackgroundMode.presetOption ?? lockScreenBackgroundOption).uiColor
+        // Determine background color based on the current mode
+        switch lockScreenBackgroundMode {
+        case .photo:
+            // When using a photo background, use black as the base color
+            // This ensures proper text color calculation and fallback behavior
+            return UIColor(red: 2 / 255, green: 2 / 255, blue: 2 / 255, alpha: 1)
+        case .presetBlack:
+            return LockScreenBackgroundOption.black.uiColor
+        case .presetGray:
+            return LockScreenBackgroundOption.gray.uiColor
+        }
     }
 
     private var lockScreenBackgroundImage: UIImage? {
+        print("🔍 lockScreenBackgroundImage - Checking for background photo...")
+        print("   Mode: \(lockScreenBackgroundMode)")
+        
+        guard lockScreenBackgroundMode == .photo else {
+            print("   ❌ Mode is not .photo, returning nil")
+            return nil
+        }
+        
+        // First try to load from file system
         if let storedImage = HomeScreenImageManager.lockScreenBackgroundSourceImage() {
+            print("   ✅ Loaded from file system")
+            if let url = HomeScreenImageManager.lockScreenBackgroundSourceURL() {
+                print("      Path: \(url.path)")
+            }
+            print("      Size: \(storedImage.size)")
             return storedImage
         }
 
+        // Fall back to AppStorage data
         guard !lockScreenBackgroundPhotoData.isEmpty,
               let dataImage = UIImage(data: lockScreenBackgroundPhotoData) else {
+            print("   ❌ No photo data available in AppStorage either")
             return nil
         }
 
-        try? HomeScreenImageManager.saveLockScreenBackgroundSource(dataImage)
+        // Save to file system for next time
+        do {
+            try HomeScreenImageManager.saveLockScreenBackgroundSource(dataImage)
+            print("   ✅ Loaded from AppStorage and saved to file system")
+            if let url = HomeScreenImageManager.lockScreenBackgroundSourceURL() {
+                print("      Path: \(url.path)")
+            }
+        } catch {
+            print("   ⚠️ Failed to save to file system: \(error)")
+        }
+        
         return dataImage
     }
 
-    var body: some View {
-        NavigationView {
-            ZStack {
-                VStack(spacing: 0) {
-                    // Notes List
-                    if notes.isEmpty {
-                        VStack {
-                            Spacer()
-                            Text("No notes yet")
-                                .foregroundColor(.gray)
-                                .font(.title3)
-                            Text("Add a note below to get started")
-                                .foregroundColor(.gray)
-                                .font(.caption)
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            hideKeyboard()
-                        }
-                    } else {
-                        List {
-                            ForEach(sortedNotes) { note in
-                                noteRow(for: note)
-                            }
-                            .onMove { source, destination in
-                                moveNotes(from: source, to: destination)
-                            }
-
-                            // Edit mode toolbar as last row
-                            if isEditMode {
-                                Section {
-                                    HStack {
-                                        Button(action: {
-                                            if selectedNotes.count == sortedNotes.count {
-                                                selectedNotes.removeAll()
-                                            } else {
-                                                selectedNotes = Set(sortedNotes.map { $0.id })
-                                            }
-                                        }) {
-                                            Text(selectedNotes.count == sortedNotes.count ? "Deselect All" : "Select All")
-                                                .foregroundColor(.appAccent)
-                                        }
-                                        .buttonStyle(.plain)
-
-                                        Spacer()
-
-                                        Button(action: {
-                                            showDeleteSelectedAlert = true
-                                        }) {
-                                            Text("Delete (\(selectedNotes.count))")
-                                                .foregroundColor(selectedNotes.isEmpty ? .gray : .red)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .disabled(selectedNotes.isEmpty)
-                                    }
-                                    .padding(.vertical, 12)
-                                    .padding(.horizontal, 16)
-                                    .listRowInsets(EdgeInsets())
-                                }
-                                .listSectionSeparator(.hidden)
-
-                                // Add spacing section below toolbar
-                                Section {
-                                    Color.clear
-                                        .frame(height: 20)
-                                        .listRowInsets(EdgeInsets())
-                                }
-                                .listSectionSeparator(.hidden)
-                            }
-                        }
-                        .listStyle(.plain)
-                        .animation(.easeInOut(duration: 0.3), value: sortedNotes.map { $0.id })
-                        .environment(\.editMode, .constant(isEditMode ? .active : .inactive))
-                    }
-
-                    // Add Note Section
-                    if !isEditMode {
-                        HStack(spacing: 12) {
-                        TextField("Add a note...", text: $newNoteText)
-                            .focused($isTextFieldFocused)
-                            .submitLabel(.done)
-                            .font(.system(size: 16))
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            .background(Color(.systemGray6))
-                            .cornerRadius(12)
-                            .onSubmit {
-                                addNote()
-                            }
-
-                        Button(action: {
-                            addNote()
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 32))
-                                .foregroundColor(newNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : .appAccent)
-                        }
-                        .disabled(newNoteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(
-                            Color(.systemBackground)
-                                .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: -1)
-                        )
-                    }
-
-                    // Update Wallpaper Button
-                    Button(action: {
-                        hideKeyboard()
-                        updateWallpaper()
-                    }) {
-                        HStack {
-                            if isGeneratingWallpaper {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            }
-                            Text(isGeneratingWallpaper ? "Generating..." : "Update Wallpaper")
-                                .fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(notes.isEmpty ? Color.gray : Color.appAccent)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
-                    .disabled(notes.isEmpty || isGeneratingWallpaper)
-                }
-            }
-            .navigationTitle("NoteWall")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    if !notes.isEmpty {
-                        Button {
-                            withAnimation {
-                                isEditMode.toggle()
-                                selectedNotes.removeAll()
-                            }
-                            if !isEditMode {
-                                hideKeyboard()
-                            }
-                        } label: {
-                            Image(systemName: isEditMode ? "xmark.circle" : "ellipsis.circle")
-                                .imageScale(.large)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            .alert("Delete Previous Wallpaper?", isPresented: $showDeletePermissionAlert) {
-                Button("Skip", role: .cancel) {
-                    if let lockScreen = pendingLockScreenImage {
-                        saveNewLockScreenWallpaper(lockScreen)
-                    }
-                }
-                Button("Continue", role: .destructive) {
-                    proceedWithDeletionAndSave()
-                }
-            } message: {
-                Text("To avoid filling your Photos library, NoteWall can delete the previous wallpaper. If you continue, iOS will ask for permission to delete the photo.")
-            }
-            .alert("Delete Note?", isPresented: $showDeleteNoteAlert) {
-                Button("Cancel", role: .cancel) {
-                    restorePendingDeletionIfNeeded()
-                }
-                Button("Delete", role: .destructive) {
-                    finalizePendingDeletion()
-                }
-            } message: {
-                Text("Are you sure you want to delete this note? This action cannot be undone.")
-            }
-            .alert("Delete Selected Notes?", isPresented: $showDeleteSelectedAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Delete", role: .destructive) {
-                    deleteSelectedNotes()
-                }
-            } message: {
-                Text("Are you sure you want to delete the selected notes? This action cannot be undone.")
-            }
-            .alert("Wallpaper Full", isPresented: $showMaxNotesAlert) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text("Your wallpaper has reached its maximum capacity. Complete or delete existing notes to add new ones.")
-            }
-        }
-        .navigationViewStyle(StackNavigationViewStyle())
-        .contentShape(Rectangle())
-        .onTapGesture {
-            hideKeyboard()
-        }
-        .onAppear {
-            loadNotes()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .requestWallpaperUpdate)) { _ in
-            hideKeyboard()
-            updateWallpaper()
-        }
-        .onChange(of: savedNotesData) { _ in
-            loadNotes()
-        }
+    init() {
+        _notes = State(initialValue: Self.initialNotes())
     }
+
+    var body: some View {
+        AnyView(ContentViewRoot(context: viewContext))
+    }
+
+    private var viewContext: ContentViewContext {
+        ContentViewContext(
+            notes: $notes,
+            newNoteText: $newNoteText,
+            isGeneratingWallpaper: $isGeneratingWallpaper,
+            pendingLockScreenImage: $pendingLockScreenImage,
+            activeAlert: $activeAlert,
+            isEditMode: $isEditMode,
+            selectedNotes: $selectedNotes,
+            shouldSkipDeletionPrompt: $shouldSkipDeletionPrompt,
+            savedNotesData: $savedNotesData,
+            isTextFieldFocused: $isTextFieldFocused,
+            addNote: addNote,
+            moveNotes: moveNotes,
+            toggleSelection: toggleSelection,
+            handleDelete: handleDelete,
+            toggleCompletion: toggleCompletion,
+            noteCommit: noteCommit,
+            hideKeyboard: hideKeyboard,
+            updateWallpaper: updateWallpaper,
+            saveNewLockScreenWallpaper: saveNewLockScreenWallpaper,
+            proceedWithDeletionAndSave: proceedWithDeletionAndSave,
+            restorePendingDeletionIfNeeded: restorePendingDeletionIfNeeded,
+            finalizePendingDeletion: finalizePendingDeletion,
+            deleteSelectedNotes: deleteSelectedNotes,
+            loadNotes: loadNotes
+        )
+    }
+
 
     private func hideKeyboard() {
         isTextFieldFocused = false
@@ -286,13 +153,13 @@ struct ContentView: View {
     }
 
     private func loadNotes() {
-        guard !savedNotesData.isEmpty else {
+        guard let data = resolvedSavedNotesData() else {
             notes = []
             return
         }
 
         do {
-            notes = try JSONDecoder().decode([Note].self, from: savedNotesData)
+            notes = try JSONDecoder().decode([Note].self, from: data)
         } catch {
             print("Failed to decode notes: \(error)")
             notes = []
@@ -321,7 +188,7 @@ struct ContentView: View {
 
         // If the new note wouldn't appear on wallpaper, show alert
         if wouldFitCount < activeNotes.count {
-            showMaxNotesAlert = true
+            activeAlert = .wallpaperFull
             return
         }
 
@@ -329,6 +196,34 @@ struct ContentView: View {
         newNoteText = ""
         saveNotes()
         hideKeyboard()
+    }
+
+    private static func initialNotes() -> [Note] {
+        guard let data = resolvedStoredNotesData() else {
+            return []
+        }
+
+        do {
+            return try JSONDecoder().decode([Note].self, from: data)
+        } catch {
+            print("Failed to decode notes during initial load: \(error)")
+            return []
+        }
+    }
+
+    private func resolvedSavedNotesData() -> Data? {
+        if !savedNotesData.isEmpty {
+            return savedNotesData
+        }
+        return Self.resolvedStoredNotesData()
+    }
+
+    private static func resolvedStoredNotesData() -> Data? {
+        guard let storedData = UserDefaults.standard.data(forKey: "savedNotes"),
+              !storedData.isEmpty else {
+            return nil
+        }
+        return storedData
     }
 
     private func moveNotes(from source: IndexSet, to destination: Int) {
@@ -339,47 +234,6 @@ struct ContentView: View {
         // Update the actual notes array to match the new order
         notes = mutableSortedNotes
         saveNotes()
-    }
-
-    @ViewBuilder
-    private func noteRow(for note: Note) -> some View {
-        if let index = notes.firstIndex(where: { $0.id == note.id }) {
-            NoteRowView(
-                note: $notes[index],
-                isOnWallpaper: false,
-                isEditMode: isEditMode,
-                isSelected: selectedNotes.contains(note.id),
-                toggleSelection: { toggleSelection(for: note) },
-                onDelete: { handleDelete(for: note) },
-                onCommit: {
-                    saveNotes()
-                    hideKeyboard()
-                }
-            )
-            .listRowInsets(EdgeInsets())
-            .listRowSeparator(.visible)
-            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                if !isEditMode {
-                    Button(role: .destructive) {
-                        handleDelete(for: note)
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                }
-            }
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                if !isEditMode {
-                    Button {
-                        toggleCompletion(for: note)
-                    } label: {
-                        Label(note.isCompleted ? "Unmark" : "Complete", systemImage: note.isCompleted ? "arrow.uturn.backward" : "checkmark")
-                    }
-                    .tint(.green)
-                }
-            }
-        } else {
-            EmptyView()
-        }
     }
 
     private func toggleSelection(for note: Note) {
@@ -401,6 +255,11 @@ struct ContentView: View {
             notes[index].isCompleted.toggle()
             saveNotes()
         }
+    }
+
+    private func noteCommit() {
+        saveNotes()
+        hideKeyboard()
     }
 
     private func resolveHomeWallpaperBaseImage() -> UIImage {
@@ -433,14 +292,24 @@ struct ContentView: View {
     }
 
     private func resolveLockBackgroundImage(using homeImage: UIImage) -> UIImage? {
-        if let photo = lockScreenBackgroundImage {
-            return photo
-        }
-
+        // Check the mode first to respect user's preset selection
+        print("🎯 resolveLockBackgroundImage - mode: \(lockScreenBackgroundMode)")
         switch lockScreenBackgroundMode {
         case .photo:
+            // Only use photo when explicitly in photo mode
+            print("   📸 Photo mode detected")
+            if let photo = lockScreenBackgroundImage {
+                print("   ✅ Returning lock screen background photo")
+                print("      Photo size: \(photo.size)")
+                return photo
+            }
+            print("   ⚠️ No lock screen photo found, using home screen image as fallback")
+            print("      Home image size: \(homeImage.size)")
             return homeImage
         case .presetBlack, .presetGray:
+            // Presets should have no background image (solid color only)
+            print("   🎨 Preset mode detected: \(lockScreenBackgroundMode)")
+            print("   ✅ Returning nil (will use solid color background)")
             return nil
         }
     }
@@ -466,7 +335,7 @@ struct ContentView: View {
 
         notePendingDeletion = note
         pendingDeletionIndex = index
-        showDeleteNoteAlert = true
+        activeAlert = .deleteNote
     }
 
     private func restorePendingDeletionIfNeeded() {
@@ -501,43 +370,79 @@ struct ContentView: View {
         selectedNotes.removeAll()
         saveNotes()
         handleNotesChangedAfterDeletion()
-        showDeleteSelectedAlert = false
+        activeAlert = nil
     }
 
     private func updateWallpaper() {
         guard !isGeneratingWallpaper else { return }
         isGeneratingWallpaper = true
 
+        // Debug logging
+        print("=== UPDATE WALLPAPER DEBUG ===")
+        print("lockScreenBackgroundMode: \(lockScreenBackgroundMode)")
+        print("lockScreenBackgroundModeRaw: \(lockScreenBackgroundModeRaw)")
+        print("lockScreenBackgroundOption: \(lockScreenBackgroundOption)")
+        print("lockScreenBackgroundColor: \(lockScreenBackgroundColor)")
+        print("lockScreenBackgroundPhotoData isEmpty: \(lockScreenBackgroundPhotoData.isEmpty)")
+
         let homeWallpaperImage = resolveHomeWallpaperBaseImage()
         do {
             try HomeScreenImageManager.saveHomeScreenImage(homeWallpaperImage)
+            print("✅ Saved home screen image to file system")
+            if let url = HomeScreenImageManager.homeScreenImageURL() {
+                print("   File path: \(url.path)")
+                print("   File exists: \(FileManager.default.fileExists(atPath: url.path))")
+            }
         } catch {
-            print("Failed to save home screen wallpaper image: \(error)")
+            print("❌ Failed to save home screen wallpaper image: \(error)")
         }
 
         let lockBackgroundImage = resolveLockBackgroundImage(using: homeWallpaperImage)
+        print("lockBackgroundImage is nil: \(lockBackgroundImage == nil)")
 
-        // Generate the wallpaper
+        // Generate the wallpaper with notes
         let lockScreenImage = WallpaperRenderer.generateWallpaper(
             from: notes,
             backgroundColor: lockScreenBackgroundColor,
             backgroundImage: lockBackgroundImage
         )
-        pendingLockScreenImage = lockScreenImage
-
+        print("Generated lock screen image size: \(lockScreenImage.size)")
+        
+        // Save to file system FIRST (this is what the shortcut reads)
         do {
             try HomeScreenImageManager.saveLockScreenWallpaper(lockScreenImage)
+            print("✅ Saved lock screen wallpaper to file system")
+            if let url = HomeScreenImageManager.lockScreenWallpaperURL() {
+                print("   File path: \(url.path)")
+                print("   File exists: \(FileManager.default.fileExists(atPath: url.path))")
+                if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+                   let fileSize = attributes[.size] as? Int {
+                    print("   File size: \(fileSize) bytes")
+                }
+            }
         } catch {
-            print("Failed to save lock screen wallpaper image: \(error)")
+            print("❌ Failed to save lock screen wallpaper image: \(error)")
         }
+        print("==============================")
+        
+        pendingLockScreenImage = lockScreenImage
 
         // Delete previous wallpaper if it exists and user hasn't opted to skip
-        if !lastLockScreenIdentifier.isEmpty && !skipDeletingOldWallpaper {
-            // Show explanation alert every time
-            showDeletePermissionAlert = true
+        // Also skip if this update was triggered from Settings (e.g., preset selection)
+        let shouldPromptForDeletion = !skipDeletingOldWallpaper &&
+            !lastLockScreenIdentifier.isEmpty &&
+            hasCompletedInitialWallpaperSetup &&
+            !shouldSkipDeletionPrompt
+
+        if shouldPromptForDeletion {
+            withAnimation {
+                activeAlert = .deletePreviousWallpaper
+            }
         } else {
-            // No previous wallpaper or user skipped deletion, just save the new one
+            // First setup, no prior wallpaper, or skipping prompt; save silently
             saveNewLockScreenWallpaper(lockScreenImage)
+            // Reset the flag after use
+            shouldSkipDeletionPrompt = false
         }
     }
 
@@ -557,17 +462,33 @@ struct ContentView: View {
     }
 
     private func saveNewLockScreenWallpaper(_ lockScreen: UIImage) {
+        print("📸 Attempting to save wallpaper to Photos library...")
+        
         PhotoSaver.saveImage(lockScreen) { success, identifier in
             DispatchQueue.main.async {
                 self.isGeneratingWallpaper = false
                 self.pendingLockScreenImage = nil
+                self.hasCompletedInitialWallpaperSetup = true
 
-                if success, let id = identifier {
-                    self.lastLockScreenIdentifier = id
+                if success {
+                    print("✅ Saved wallpaper to Photos library")
+                    if let id = identifier {
+                        self.lastLockScreenIdentifier = id
+                        print("   Photo ID: \(id)")
+                    }
+                } else {
+                    print("⚠️ Failed to save to Photos library (permission denied or error)")
+                    print("   Wallpaper is still saved to file system and can be used by shortcut")
+                }
+                
+                // Post notification FIRST so UI updates
+                NotificationCenter.default.post(name: .wallpaperGenerationFinished, object: nil)
+                
+                // Auto-open shortcut after a delay to ensure wallpaper is fully saved
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    print("🚀 Opening shortcut to apply wallpaper...")
                     self.openShortcut()
                 }
-
-                NotificationCenter.default.post(name: .wallpaperGenerationFinished, object: nil)
             }
         }
     }
@@ -586,11 +507,13 @@ struct ContentView: View {
     }
 
     private func setBlankWallpaper() {
+        print("=== SETTING BLANK WALLPAPER ===")
         let homeWallpaperImage = resolveHomeWallpaperBaseImage()
         do {
             try HomeScreenImageManager.saveHomeScreenImage(homeWallpaperImage)
+            print("✅ Saved blank home screen image")
         } catch {
-            print("Failed to save home screen wallpaper image: \(error)")
+            print("❌ Failed to save home screen wallpaper image: \(error)")
         }
 
         let lockBackgroundImage = resolveLockBackgroundImage(using: homeWallpaperImage)
@@ -602,12 +525,13 @@ struct ContentView: View {
 
         do {
             try HomeScreenImageManager.saveLockScreenWallpaper(lockScreenImage)
+            print("✅ Saved blank lock screen wallpaper")
         } catch {
-            print("Failed to save lock screen wallpaper image: \(error)")
+            print("❌ Failed to save lock screen wallpaper image: \(error)")
         }
+        print("==============================")
 
         saveNewLockScreenWallpaper(lockScreenImage)
-        NotificationCenter.default.post(name: .wallpaperGenerationFinished, object: nil)
     }
 
     private func openShortcut() {
@@ -620,6 +544,503 @@ struct ContentView: View {
     }
 }
 
+private struct ContentViewContext {
+    let notes: Binding<[Note]>
+    let newNoteText: Binding<String>
+    let isGeneratingWallpaper: Binding<Bool>
+    let pendingLockScreenImage: Binding<UIImage?>
+    let activeAlert: Binding<ActiveAlert?>
+    let isEditMode: Binding<Bool>
+    let selectedNotes: Binding<Set<UUID>>
+    let shouldSkipDeletionPrompt: Binding<Bool>
+    let savedNotesData: Binding<Data>
+    let isTextFieldFocused: FocusState<Bool>.Binding
+    let addNote: () -> Void
+    let moveNotes: (IndexSet, Int) -> Void
+    let toggleSelection: (Note) -> Void
+    let handleDelete: (Note) -> Void
+    let toggleCompletion: (Note) -> Void
+    let noteCommit: () -> Void
+    let hideKeyboard: () -> Void
+    let updateWallpaper: () -> Void
+    let saveNewLockScreenWallpaper: (UIImage) -> Void
+    let proceedWithDeletionAndSave: () -> Void
+    let restorePendingDeletionIfNeeded: () -> Void
+    let finalizePendingDeletion: () -> Void
+    let deleteSelectedNotes: () -> Void
+    let loadNotes: () -> Void
+}
+
+private enum ActiveAlert: String, Identifiable {
+    case deletePreviousWallpaper
+    case deleteNote
+    case deleteSelectedNotes
+    case wallpaperFull
+
+    var id: String { rawValue }
+}
+
+private struct ContentViewRoot: View {
+    let context: ContentViewContext
+
+    var body: some View {
+        RootConfiguredView(context: context) {
+            MainContentView(context: context)
+        }
+        .eraseToAnyView()
+    }
+}
+
+private struct RootConfiguredView<Content: View>: View {
+    let context: ContentViewContext
+    let content: Content
+
+    init(context: ContentViewContext, @ViewBuilder content: () -> Content) {
+        self.context = context
+        self.content = content()
+    }
+
+    var body: some View {
+        configuredContent
+    }
+
+    @ViewBuilder
+    private var configuredContent: some View {
+        content
+            .modifier(RootConfiguredModifier(context: context))
+    }
+}
+
+private struct RootConfiguredModifier: ViewModifier {
+    let context: ContentViewContext
+
+    func body(content: Content) -> some View {
+        configuredContent(for: content)
+    }
+
+    private func configuredContent(for content: Content) -> some View {
+        content
+            .alert(item: context.activeAlert) { alert(for: $0) }
+            .contentShape(Rectangle())
+            .onTapGesture { context.hideKeyboard() }
+            .onAppear { context.loadNotes() }
+            .onReceive(NotificationCenter.default.publisher(for: .requestWallpaperUpdate)) { notification in
+                context.hideKeyboard()
+                
+                // Check if we should skip the deletion prompt
+                if let request = notification.object as? WallpaperUpdateRequest {
+                    context.shouldSkipDeletionPrompt.wrappedValue = request.skipDeletionPrompt
+                } else {
+                    context.shouldSkipDeletionPrompt.wrappedValue = false
+                }
+                
+                context.updateWallpaper()
+            }
+            .onChange(of: context.savedNotesData.wrappedValue) { _ in
+                context.loadNotes()
+            }
+    }
+
+    private func alert(for alert: ActiveAlert) -> Alert {
+        switch alert {
+        case .deletePreviousWallpaper:
+            return Alert(
+                title: Text("Delete Previous Wallpaper?"),
+                message: Text("To avoid filling your Photos library, NoteWall can delete the previous wallpaper. If you continue, iOS will ask for permission to delete the photo."),
+                primaryButton: .cancel(Text("Skip")) {
+                    if let lockScreen = context.pendingLockScreenImage.wrappedValue {
+                        context.saveNewLockScreenWallpaper(lockScreen)
+                    }
+                    context.shouldSkipDeletionPrompt.wrappedValue = false
+                },
+                secondaryButton: .destructive(Text("Continue")) {
+                    context.proceedWithDeletionAndSave()
+                    context.shouldSkipDeletionPrompt.wrappedValue = false
+                }
+            )
+        case .deleteNote:
+            return Alert(
+                title: Text("Delete Note?"),
+                message: Text("Are you sure you want to delete this note? This action cannot be undone."),
+                primaryButton: .destructive(Text("Delete")) {
+                    context.finalizePendingDeletion()
+                },
+                secondaryButton: .cancel {
+                    context.restorePendingDeletionIfNeeded()
+                }
+            )
+        case .deleteSelectedNotes:
+            return Alert(
+                title: Text("Delete Selected Notes?"),
+                message: Text("Are you sure you want to delete the selected notes? This action cannot be undone."),
+                primaryButton: .destructive(Text("Delete")) {
+                    context.deleteSelectedNotes()
+                },
+                secondaryButton: .cancel()
+            )
+        case .wallpaperFull:
+            return Alert(
+                title: Text("Wallpaper Full"),
+                message: Text("Your wallpaper has reached its maximum capacity. Complete or delete existing notes to add new ones."),
+                dismissButton: .cancel(Text("OK"))
+            )
+        }
+    }
+}
+
+private struct MainContentView: View {
+    let context: ContentViewContext
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                VStack(spacing: 0) {
+                    NotesSectionView(context: context)
+
+                    if !context.isEditMode.wrappedValue {
+                        AddNoteSectionView(context: context)
+                    }
+
+                    UpdateWallpaperButtonView(context: context)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                EditModeMenuButton(context: context)
+                    .padding(.top, -45)
+                    .padding(.trailing, 16)
+            }
+            .navigationTitle("NoteWall")
+            .navigationBarTitleDisplayMode(.large)
+        }
+        .navigationViewStyle(StackNavigationViewStyle())
+        .onAppear {
+            context.loadNotes()
+        }
+    }
+}
+
+private struct NotesSectionView: View {
+    let context: ContentViewContext
+
+    var body: some View {
+        Group {
+            if context.notes.wrappedValue.isEmpty {
+                EmptyStateView(hideKeyboard: context.hideKeyboard)
+            } else {
+                NotesListView(context: context)
+            }
+        }
+    }
+}
+
+private struct EmptyStateView: View {
+    let hideKeyboard: () -> Void
+
+    var body: some View {
+        VStack {
+            Spacer()
+            Text("No notes yet")
+                .foregroundColor(.gray)
+                .font(.title3)
+            Text("Add a note below to get started")
+                .foregroundColor(.gray)
+                .font(.caption)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            hideKeyboard()
+        }
+    }
+}
+
+private struct NotesListView: View {
+    let context: ContentViewContext
+
+    private var notes: [Note] {
+        context.notes.wrappedValue
+    }
+
+    var body: some View {
+        List {
+            ForEach(notes) { note in
+                NoteRowContainer(note: note, context: context)
+            }
+            .onMove { source, destination in
+                context.moveNotes(source, destination)
+            }
+
+            if context.isEditMode.wrappedValue {
+                EditModeSupplementView(context: context, notes: notes)
+            }
+        }
+        .listStyle(.plain)
+        .animation(.easeInOut(duration: 0.3), value: notes.map { $0.id })
+        .environment(\.editMode, .constant(context.isEditMode.wrappedValue ? .active : .inactive))
+    }
+}
+
+private struct EditModeMenuButton: View {
+    let context: ContentViewContext
+
+    var body: some View {
+        if context.notes.wrappedValue.isEmpty {
+            EmptyView()
+        } else {
+            Button(action: toggleEditMode) {
+                Image(systemName: context.isEditMode.wrappedValue ? "xmark" : "ellipsis")
+                    .font(.system(size: 16, weight: .bold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(Color.white)
+            }
+            .buttonStyle(EditModeChipButtonStyle(isActive: context.isEditMode.wrappedValue))
+            .contentShape(Circle())
+            .accessibilityLabel(context.isEditMode.wrappedValue ? "Close editing" : "Edit notes")
+            .contextMenu {
+                if context.isEditMode.wrappedValue {
+                    Button("Select All") {
+                        selectAllNotes()
+                    }
+
+                    Button("Deselect All") {
+                        deselectAllNotes()
+                    }
+
+                    Button("Delete Selected", role: .destructive) {
+                        context.activeAlert.wrappedValue = .deleteSelectedNotes
+                    }
+                    .disabled(context.selectedNotes.wrappedValue.isEmpty)
+                } else {
+                    Button("Enter Edit Mode") {
+                        activateEditMode()
+                    }
+                    Button("Select All") {
+                        selectAllNotes()
+                    }
+                }
+            }
+        }
+    }
+
+    private func toggleEditMode() {
+        guard !context.notes.wrappedValue.isEmpty else { return }
+        context.hideKeyboard()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            context.isEditMode.wrappedValue.toggle()
+            if !context.isEditMode.wrappedValue {
+                context.selectedNotes.wrappedValue.removeAll()
+            }
+        }
+    }
+
+    private func activateEditMode() {
+        guard !context.isEditMode.wrappedValue else { return }
+        context.hideKeyboard()
+        withAnimation(.easeInOut(duration: 0.25)) {
+            context.isEditMode.wrappedValue = true
+        }
+    }
+
+    private func selectAllNotes() {
+        if !context.isEditMode.wrappedValue {
+            activateEditMode()
+        }
+        context.selectedNotes.wrappedValue = Set(context.notes.wrappedValue.map { $0.id })
+    }
+
+    private func deselectAllNotes() {
+        context.selectedNotes.wrappedValue.removeAll()
+    }
+}
+
+private struct EditModeChipButtonStyle: ButtonStyle {
+    let isActive: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        return configuration.label
+            .frame(width: 28, height: 28)
+            .background(
+                Circle()
+                    .fill(Color.black)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                Color.white.opacity(pressed ? 1.0 : 0.95),
+                                lineWidth: pressed ? 3.5 : (isActive ? 3.0 : 2.5)
+                            )
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.25), radius: 8, x: 0, y: 4)
+            .scaleEffect(pressed ? 0.97 : 1.0)
+            .animation(.easeInOut(duration: 0.12), value: pressed)
+    }
+}
+
+
+private struct NoteRowContainer: View {
+    let note: Note
+    let context: ContentViewContext
+
+    var body: some View {
+        if let binding = context.binding(for: note) {
+            NoteRowView(
+                note: binding,
+                isOnWallpaper: false,
+                isEditMode: context.isEditMode.wrappedValue,
+                isSelected: context.selectedNotes.wrappedValue.contains(note.id),
+                toggleSelection: { context.toggleSelection(note) },
+                onDelete: { context.handleDelete(note) },
+                onToggleCompletion: { context.toggleCompletion(note) },
+                onCommit: context.noteCommit
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .animation(.easeInOut(duration: 0.25), value: context.isEditMode.wrappedValue)
+        }
+    }
+}
+
+private struct EditModeSupplementView: View {
+    let context: ContentViewContext
+    let notes: [Note]
+
+    var body: some View {
+        Group {
+            Section {
+                HStack {
+                    Button(action: toggleSelection) {
+                        Text(selectionButtonTitle)
+                            .foregroundColor(.appAccent)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Button(action: { context.activeAlert.wrappedValue = .deleteSelectedNotes }) {
+                        Text("Delete (\(context.selectedNotes.wrappedValue.count))")
+                            .foregroundColor(context.selectedNotes.wrappedValue.isEmpty ? .gray : .red)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(context.selectedNotes.wrappedValue.isEmpty)
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+                .listRowInsets(EdgeInsets())
+            }
+            .listSectionSeparator(.hidden)
+
+            Section {
+                Color.clear
+                    .frame(height: 20)
+                    .listRowInsets(EdgeInsets())
+            }
+            .listSectionSeparator(.hidden)
+        }
+    }
+
+    private var selectionButtonTitle: String {
+        context.selectedNotes.wrappedValue.count == notes.count ? "Deselect All" : "Select All"
+    }
+
+    private func toggleSelection() {
+        if context.selectedNotes.wrappedValue.count == notes.count {
+            context.selectedNotes.wrappedValue.removeAll()
+        } else {
+            context.selectedNotes.wrappedValue = Set(notes.map { $0.id })
+        }
+    }
+}
+
+private struct AddNoteSectionView: View {
+    let context: ContentViewContext
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TextField("Add a note...", text: context.newNoteText)
+                .focused(context.isTextFieldFocused)
+                .submitLabel(.done)
+                .font(.system(size: 16))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
+                .onSubmit {
+                    context.addNote()
+                }
+
+            Button(action: { context.addNote() }) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundColor(isAddDisabled ? .gray : .appAccent)
+            }
+            .disabled(isAddDisabled)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            Color(.systemBackground)
+                .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: -1)
+        )
+    }
+
+    private var isAddDisabled: Bool {
+        context.newNoteText.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+private struct UpdateWallpaperButtonView: View {
+    let context: ContentViewContext
+
+    var body: some View {
+        Button(action: {
+            context.hideKeyboard()
+            context.updateWallpaper()
+        }) {
+            HStack {
+                if context.isGeneratingWallpaper.wrappedValue {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                }
+                Text(context.isGeneratingWallpaper.wrappedValue ? "Generating..." : "Update Wallpaper")
+                    .fontWeight(.semibold)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(context.notes.wrappedValue.isEmpty ? Color.gray : Color.appAccent)
+            .foregroundColor(.white)
+            .cornerRadius(12)
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+        .disabled(context.notes.wrappedValue.isEmpty || context.isGeneratingWallpaper.wrappedValue)
+    }
+}
+
+private extension ContentViewContext {
+    func binding(for note: Note) -> Binding<Note>? {
+        guard let index = notes.wrappedValue.firstIndex(where: { $0.id == note.id }) else {
+            return nil
+        }
+        return Binding<Note>(
+            get: { notes.wrappedValue[index] },
+            set: { newValue in
+                var current = notes.wrappedValue
+                current[index] = newValue
+                notes.wrappedValue = current
+            }
+        )
+    }
+}
+
+private extension View {
+    func eraseToAnyView() -> AnyView {
+        AnyView(self)
+    }
+}
+
 struct NoteRowView: View {
     @Binding var note: Note
     let isOnWallpaper: Bool
@@ -627,54 +1048,108 @@ struct NoteRowView: View {
     let isSelected: Bool
     let toggleSelection: () -> Void
     let onDelete: () -> Void
+    let onToggleCompletion: () -> Void
     let onCommit: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            if isEditMode {
-                Button(action: toggleSelection) {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 22))
-                        .foregroundColor(isSelected ? .appAccent : .gray)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                if isEditMode {
+                    Button(action: toggleSelection) {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundColor(isSelected ? .appAccent : .gray)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-            }
 
-            TextField("Note", text: $note.text)
-                .submitLabel(.done)
-                .textFieldStyle(.plain)
-                .foregroundColor(note.isCompleted ? .gray : .primary)
-                .onSubmit(onCommit)
-                .disabled(isEditMode)
-                .overlay(
-                    note.isCompleted ?
-                        Rectangle()
-                            .frame(height: 1)
-                            .foregroundColor(.gray)
-                    : nil
-                )
+                TextField("Note", text: $note.text)
+                    .submitLabel(.done)
+                    .textFieldStyle(.plain)
+                    .foregroundColor(note.isCompleted ? .gray : .primary)
+                    .onSubmit(onCommit)
+                    .disabled(isEditMode)
+                    .accentStrikethrough(note.isCompleted)
 
-            if isOnWallpaper && !isEditMode {
-                Image(systemName: "photo.badge.checkmark.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(.appAccent)
-            }
-
-            if !isEditMode {
                 Spacer(minLength: 0)
+
+                if isOnWallpaper && !isEditMode {
+                    Image(systemName: "photo.badge.checkmark.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.appAccent)
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+
+            Divider()
+                .background(Color(.separator))
+                .frame(maxWidth: .infinity)
+                .opacity(isEditMode ? 0 : 1)
         }
-        .padding()
         .background(Color(.systemBackground))
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture {
             if isEditMode {
                 toggleSelection()
             }
         }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            if !isEditMode {
+                Button {
+                    onToggleCompletion()
+                } label: {
+                    Label(
+                        note.isCompleted ? "Unmark" : "Done",
+                        systemImage: note.isCompleted ? "arrow.uturn.backward.circle.fill" : "checkmark.circle.fill"
+                    )
+                }
+                .tint(.appAccent)
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if !isEditMode {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: isEditMode)
     }
 }
 
 #Preview {
     ContentView()
+}
+
+private struct AccentStrikethrough: ViewModifier {
+    let isActive: Bool
+
+    func body(content: Content) -> some View {
+        if isActive {
+            if #available(iOS 16.0, *) {
+                content
+                    .strikethrough(true, color: .appAccent)
+            } else {
+                content
+                    .overlay(
+                        Rectangle()
+                            .foregroundColor(.appAccent)
+                            .frame(height: 1.2)
+                            .mask(content)
+                    )
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    func accentStrikethrough(_ isActive: Bool) -> some View {
+        modifier(AccentStrikethrough(isActive: isActive))
+    }
 }
