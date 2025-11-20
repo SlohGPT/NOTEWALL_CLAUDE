@@ -22,6 +22,9 @@
 		C1000001000000000000001 /* PaywallManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000001000000000000001 /* PaywallManager.swift */; };
 		C1000002000000000000001 /* StoreKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000002000000000000001 /* StoreKitManager.swift */; };
 		C1000003000000000000001 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000003000000000000001 /* PaywallView.swift */; };
+		D1000001000000000000001 /* CrashReporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000001000000000000001 /* CrashReporter.swift */; };
+		E1000001000000000000002 /* notewall-demo-video.mov in Resources */ = {isa = PBXBuildFile; fileRef = E2000001000000000000002 /* notewall-demo-video.mov */; };
+		F1000001000000000000001 /* notifications.mov in Resources */ = {isa = PBXBuildFile; fileRef = F2000001000000000000001 /* notifications.mov */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +46,9 @@
 		C2000001000000000000001 /* PaywallManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallManager.swift; sourceTree = "<group>"; };
 		C2000002000000000000001 /* StoreKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreKitManager.swift; sourceTree = "<group>"; };
 		C2000003000000000000001 /* PaywallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallView.swift; sourceTree = "<group>"; };
+		D2000001000000000000001 /* CrashReporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashReporter.swift; sourceTree = "<group>"; };
+		E2000001000000000000002 /* notewall-demo-video.mov */ = {isa = PBXFileReference; lastKnownFileType = video.quicktime; path = "notewall-demo-video.mov"; sourceTree = "<group>"; };
+		F2000001000000000000001 /* notifications.mov */ = {isa = PBXFileReference; lastKnownFileType = video.quicktime; path = "notifications.mov"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -61,6 +67,8 @@
 			children = (
 				A5000002000000000000001 /* NoteWall */,
 				A5000003000000000000001 /* Products */,
+				E2000001000000000000002 /* notewall-demo-video.mov */,
+				F2000001000000000000001 /* notifications.mov */,
 			);
 			sourceTree = "<group>";
 		};
@@ -81,6 +89,7 @@
 				C2000001000000000000001 /* PaywallManager.swift */,
 				C2000002000000000000001 /* StoreKitManager.swift */,
 				C2000003000000000000001 /* PaywallView.swift */,
+				D2000001000000000000001 /* CrashReporter.swift */,
 				A2000009000000000000001 /* Assets.xcassets */,
 				A2000010000000000000001 /* Info.plist */,
 				42DB5DEA2EC32ADB00F21F88 /* NoteWall.storekit */,
@@ -156,6 +165,8 @@
 			files = (
 				42DB5DEB2EC32ADB00F21F88 /* NoteWall.storekit in Resources */,
 				A1000009000000000000001 /* Assets.xcassets in Resources */,
+				E1000001000000000000002 /* notewall-demo-video.mov in Resources */,
+				F1000001000000000000001 /* notifications.mov in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -179,6 +190,7 @@
 				C1000001000000000000001 /* PaywallManager.swift in Sources */,
 				C1000002000000000000001 /* StoreKitManager.swift in Sources */,
 				C1000003000000000000001 /* PaywallView.swift in Sources */,
+				D1000001000000000000001 /* CrashReporter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -326,7 +338,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.notewall.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.carly.notewall;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -359,7 +371,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.notewall.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.carly.notewall;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;

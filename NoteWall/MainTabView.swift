@@ -29,6 +29,11 @@ struct BottomNavigationBar: View {
 
             // Home Tab
             Button(action: {
+                // Light impact haptic for tab switch (only if switching to a different tab)
+                if selectedTab != 0 {
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                }
                 selectedTab = 0
             }) {
                 VStack(spacing: 4) {
@@ -44,6 +49,11 @@ struct BottomNavigationBar: View {
 
             // Settings Tab
             Button(action: {
+                // Light impact haptic for tab switch (only if switching to a different tab)
+                if selectedTab != 1 {
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                }
                 selectedTab = 1
             }) {
                 VStack(spacing: 4) {

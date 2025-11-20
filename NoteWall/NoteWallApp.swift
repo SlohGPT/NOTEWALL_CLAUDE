@@ -3,20 +3,17 @@ import SwiftUI
 @main
 struct NoteWallApp: App {
     @AppStorage("hasCompletedSetup") private var hasCompletedSetup = false
-    @AppStorage("completedOnboardingVersion") private var completedOnboardingVersion = 0
     @State private var showOnboarding = false
     
     private let onboardingVersion = 3
 
     init() {
-        // DEVELOPMENT: Clear all UserDefaults on every launch for testing
-        // Comment this out for production builds
-        #if DEBUG
-        clearAllUserDefaults()
-        #endif
+        // Initialize crash reporting
+        setupCrashReporting()
+        HomeScreenImageManager.prepareStorageStructure()
         
-        // Check onboarding status on init
-        let shouldShow = !hasCompletedSetup || completedOnboardingVersion < onboardingVersion
+        // Check onboarding status on init (only show for first launch)
+        let shouldShow = !hasCompletedSetup
         _showOnboarding = State(initialValue: shouldShow)
         
         // Reset paywall data if this is a fresh install
@@ -25,14 +22,34 @@ struct NoteWallApp: App {
         }
     }
     
-    private func clearAllUserDefaults() {
-        if let bundleID = Bundle.main.bundleIdentifier {
-            UserDefaults.standard.removePersistentDomain(forName: bundleID)
-            UserDefaults.standard.synchronize()
-            print("🧹 Cleared all UserDefaults for fresh testing")
+    private func setupCrashReporting() {
+        // Enable crash reporting in production
+        CrashReporter.isEnabled = true
+        
+        // Set app version for crash reports
+        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+           let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+            CrashReporter.setCustomKey("app_version", value: "\(version) (\(build))")
         }
+        
+        // Set device info
+        CrashReporter.setCustomKey("device_model", value: UIDevice.current.model)
+        CrashReporter.setCustomKey("ios_version", value: UIDevice.current.systemVersion)
+        
+        CrashReporter.logMessage("App launched", level: .info)
+        
+        // To enable Firebase Crashlytics, uncomment below and add Firebase SDK:
+        /*
+        import FirebaseCore
+        import FirebaseCrashlytics
+        
+        FirebaseApp.configure()
+        
+        // Enable Crashlytics collection
+        Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(true)
+        */
     }
-
+    
     var body: some Scene {
         WindowGroup {
             MainTabView()
@@ -43,14 +60,11 @@ struct NoteWallApp: App {
                     )
                 }
                 .onAppear {
-                    // Show onboarding if not completed or needs to be refreshed for this version
-                    showOnboarding = !hasCompletedSetup || completedOnboardingVersion < onboardingVersion
+                    // Show onboarding only for users who haven't completed setup yet
+                    showOnboarding = !hasCompletedSetup
                 }
-                .onChange(of: hasCompletedSetup) { _ in
-                    showOnboarding = !hasCompletedSetup || completedOnboardingVersion < onboardingVersion
-                }
-                .onChange(of: completedOnboardingVersion) { _ in
-                    showOnboarding = !hasCompletedSetup || completedOnboardingVersion < onboardingVersion
+                .onChange(of: hasCompletedSetup) { newValue in
+                    showOnboarding = !newValue
                 }
                 .onOpenURL { url in
                     // Handle URL scheme when app is opened via notewall://

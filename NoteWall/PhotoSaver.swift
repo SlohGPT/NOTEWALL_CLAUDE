@@ -95,6 +95,7 @@ struct PhotoSaver {
             DispatchQueue.main.async {
                 if let error = error {
                     print("Error saving image: \(error.localizedDescription)")
+                    CrashReporter.logPhotoSaveError(error)
                     completion(false, nil)
                 } else {
                     completion(success, assetIdentifier)

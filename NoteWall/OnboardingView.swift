@@ -2,8 +2,22 @@ import SwiftUI
 import PhotosUI
 import UIKit
 import QuartzCore
+import AVKit
+import AVFoundation
+
+// Only log in debug builds to reduce console noise
+#if DEBUG
+private func debugLog(_ message: String) {
+    print(message)
+}
+#else
+private func debugLog(_ message: String) {
+    // No-op in release builds
+}
+#endif
 
 private enum OnboardingPage: Int, CaseIterable, Hashable {
+    case welcome
     case installShortcut
     case addNotes
     case chooseWallpapers
@@ -32,18 +46,25 @@ struct OnboardingView: View {
     @State private var lockScreenBackgroundStatusMessage: String?
     @State private var lockScreenBackgroundStatusColor: Color = .gray
 
-    @State private var currentPage: OnboardingPage = .installShortcut
+    @State private var currentPage: OnboardingPage = .welcome
     @State private var isLaunchingShortcut = false
     @State private var shortcutLaunchFallback: DispatchWorkItem?
+    @State private var wallpaperVerificationTask: Task<Void, Never>?
     @State private var didTriggerShortcutRun = false
     @State private var isLoadingWallpaperStep = false
+    @State private var demoVideoPlayer: AVQueuePlayer?
+    @State private var demoVideoLooper: AVPlayerLooper?
+    @State private var notificationsVideoPlayer: AVQueuePlayer?
+    @State private var notificationsVideoLooper: AVPlayerLooper?
+    @State private var notificationsVideoReady: Bool = false
+    private let demoVideoPlaybackRate: Float = 1.5
     
     // Notes management for onboarding
     @State private var onboardingNotes: [Note] = []
     @State private var currentNoteText = ""
     @FocusState private var isNoteFieldFocused: Bool
 
-    private let shortcutURL = "https://www.icloud.com/shortcuts/a00482ed7b054ee0b42d7d9a7796c7eb"
+    private let shortcutURL = "https://www.icloud.com/shortcuts/5c43e6ec791e4a90b8172bda31243e5c"
 
     var body: some View {
         Group {
@@ -54,6 +75,9 @@ struct OnboardingView: View {
             }
         }
         .interactiveDismissDisabled()
+        .task {
+            HomeScreenImageManager.prepareStorageStructure()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .shortcutWallpaperApplied)) { _ in
             completeShortcutLaunch()
         }
@@ -62,8 +86,20 @@ struct OnboardingView: View {
         }
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .active {
-                advanceAfterShortcutInstallIfNeeded()
-                completeShortcutLaunch()
+                // Only advance if we're still on the install shortcut step
+                // Don't interfere with other steps (like allowPermissions)
+                if currentPage == .installShortcut {
+                    advanceAfterShortcutInstallIfNeeded()
+                }
+                // Only complete shortcut launch if we're on the chooseWallpapers step
+                if currentPage == .chooseWallpapers {
+                    completeShortcutLaunch()
+                }
+            }
+        }
+        .onChange(of: currentPage) { page in
+            if page == .chooseWallpapers {
+                HomeScreenImageManager.prepareStorageStructure()
             }
         }
     }
@@ -93,21 +129,29 @@ struct OnboardingView: View {
                         .ignoresSafeArea()
                 )
 
-            Group {
-                switch currentPage {
-                case .installShortcut:
-                    installShortcutStep()
-                case .addNotes:
-                    addNotesStep()
-                case .chooseWallpapers:
-                    chooseWallpapersStep(includePhotoPicker: includePhotoPicker)
-                case .allowPermissions:
-                    allowPermissionsStep()
-                case .overview:
-                    overviewStep()
+            ZStack {
+                // Solid background to prevent seeing underlying content during transitions
+                Color(.systemBackground)
+                    .ignoresSafeArea()
+                
+                Group {
+                    switch currentPage {
+                    case .welcome:
+                        welcomeStep()
+                    case .installShortcut:
+                        installShortcutStep()
+                    case .addNotes:
+                        addNotesStep()
+                    case .chooseWallpapers:
+                        chooseWallpapersStep(includePhotoPicker: includePhotoPicker)
+                    case .allowPermissions:
+                        allowPermissionsStep()
+                    case .overview:
+                        overviewStep()
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .id(currentPage)
             .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
             .animation(.easeInOut(duration: 0.25), value: currentPage)
@@ -168,37 +212,94 @@ struct OnboardingView: View {
         .background(Color(.systemBackground).ignoresSafeArea(edges: .bottom))
     }
 
-    private func installShortcutStep() -> some View {
-        ZStack(alignment: .topTrailing) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Install the NoteWall Shortcut")
+    private func welcomeStep() -> some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 28) {
+                VStack(spacing: 16) {
+                    Image("OnboardingLogo")
+                        .resizable()
+                        .interpolation(.high)
+                        .antialiased(true)
+                        .scaledToFit()
+                        .frame(width: 148, height: 148)
+                        .shadow(color: Color.black.opacity(0.18), radius: 18, x: 0, y: 10)
+                        .accessibilityHidden(true)
+                    
+                    Text("Welcome to NoteWall")
                         .font(.system(.largeTitle, design: .rounded))
                         .fontWeight(.bold)
-
-                    demoVideoPlaceholder
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                    
+                    Text("Never forget again. NoteWall keeps the things you care about front and center every time you glance at your phone.")
+                        .font(.system(.title3))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 12)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 24)
-                .padding(.top, 32)
-                .padding(.bottom, 32)
+                
+                VStack(spacing: 16) {
+                    welcomeHighlightCard(
+                        title: "Stay on track",
+                        subtitle: "Pin your priorities to the lock screen so the next action is always waiting for you.",
+                        icon: "checkmark.circle.fill"
+                    )
+                    
+                    welcomeHighlightCard(
+                        title: "Remember what matters",
+                        subtitle: "See gratitude notes, reminders, and personal cues right when you pick up your phone.",
+                        icon: "sparkles"
+                    )
+                    
+                    welcomeHighlightCard(
+                        title: "Move faster",
+                        subtitle: "Drop thoughts into NoteWall in seconds and turn them into wallpapers with one tap.",
+                        icon: "bolt.fill"
+                    )
+                }
             }
-            .scrollAlwaysBounceIfAvailable()
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 36)
+        }
+        .scrollAlwaysBounceIfAvailable()
+    }
+    
+    private func welcomeHighlightCard(title: String, subtitle: String, icon: String) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundColor(.appAccent)
+                .frame(width: 40, height: 40)
             
-            // Skip button for testing
-            Button(action: {
-                completeOnboarding()
-            }) {
-                Text("Skip (Testing)")
-                    .font(.caption)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.red)
-                    .cornerRadius(8)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.system(.title3, design: .rounded))
+                    .fontWeight(.semibold)
+                
+                Text(subtitle)
+                    .font(.body)
+                    .foregroundColor(.secondary)
             }
-            .padding(.top, 16)
-            .padding(.trailing, 24)
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+    
+    private func installShortcutStep() -> some View {
+        GeometryReader { proxy in
+            VStack {
+                demoVideoSection(minHeight: proxy.size.height - 48)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 24)
+                    .padding(.bottom, 24)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
     
@@ -305,6 +406,10 @@ struct OnboardingView: View {
         let trimmed = currentNoteText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         
+        // Light impact haptic for adding note during onboarding
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+        
         withAnimation {
             let newNote = Note(text: trimmed, isCompleted: false)
             onboardingNotes.append(newNote)
@@ -322,6 +427,9 @@ struct OnboardingView: View {
     
     private func removeNote(_ note: Note) {
         if let index = onboardingNotes.firstIndex(where: { $0.id == note.id }) {
+            // Light impact haptic for removing note during onboarding
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
             onboardingNotes.remove(at: index)
         }
     }
@@ -331,95 +439,47 @@ struct OnboardingView: View {
     }
 
     private func allowPermissionsStep() -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
                 Text("Allow Permissions")
                     .font(.system(.largeTitle, design: .rounded))
                     .fontWeight(.bold)
-
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("After installing the shortcut, you'll see privacy notifications at the top of your screen.")
-                        .font(.system(.title3))
-                        .foregroundColor(.secondary)
-
-                    // Sample notification image
-                    VStack(spacing: 16) {
-                        Image("notification")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 120)
-                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .stroke(Color.black.opacity(0.08), lineWidth: 0.5)
-                            )
-                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-
-                        // Arrow pointing up
-                        VStack(spacing: 8) {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(.appAccent)
-                            
-                            Text("Click \"Allow\" for ALL permissions")
-                                .font(.system(.title2))
-                                .fontWeight(.semibold)
-                                .foregroundColor(.appAccent)
-                                .multilineTextAlignment(.center)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Why these permissions are needed:")
-                            .font(.system(.headline))
-                            .foregroundColor(.primary)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: "photo.on.rectangle")
-                                    .foregroundColor(.appAccent)
-                                    .frame(width: 20)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Photos Access")
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                    Text("To save and apply wallpapers to your device")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: "folder")
-                                    .foregroundColor(.appAccent)
-                                    .frame(width: 20)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Files Access")
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                    Text("To read wallpaper files created by the app")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                    }
-
-                    Text("💡 Tip: If you accidentally tap \"Don't Allow\", you can change permissions later in Settings > Shortcuts > NoteWall")
-                        .font(.callout)
-                        .foregroundColor(.secondary)
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 16)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(8)
+                    .padding(.top, 24)
+                
+                Text("Click \"Allow\" for ALL permissions")
+                    .font(.system(.title3))
+                    .foregroundColor(.appAccent)
+                    .fontWeight(.semibold)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 8)
+                
+                notificationsVideoSection(minHeight: proxy.size.height * 0.45)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                
+                VStack(spacing: 12) {
+                    overviewInfoCard(
+                        title: "Capture Notes Fast",
+                        subtitle: "Add or pin notes in the Home tab whenever inspiration hits.",
+                        icon: "square.and.pencil"
+                    )
+                    
+                    overviewInfoCard(
+                        title: "Update the Wallpaper",
+                        subtitle: "Tap \"Update Wallpaper\" to create the latest lock screen image with your current notes.",
+                        icon: "paintbrush"
+                    )
                 }
+                .padding(.horizontal, 24)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 24)
-            .padding(.top, 32)
-            .padding(.bottom, 32)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .scrollAlwaysBounceIfAvailable()
+        .onAppear {
+            // Prepare video player (may already be preloaded from step 3)
+            prepareNotificationsVideoPlayerIfNeeded()
+        }
     }
 
     @ViewBuilder
@@ -542,47 +602,72 @@ struct OnboardingView: View {
     }
 
     private func overviewStep() -> some View {
-        ScrollView {
-            VStack(spacing: 28) {
-                overviewHeroCard
-
-                VStack(alignment: .leading, spacing: 18) {
-                    Text("Here's how NoteWall keeps everything fresh.")
-                        .font(.body)
-                        .foregroundColor(.secondary)
-
-                    VStack(spacing: 16) {
-                        overviewInfoCard(
-                            title: "Capture Notes Fast",
-                            subtitle: "Add or pin notes in the Home tab whenever inspiration hits.",
-                            icon: "square.and.pencil"
-                        )
-
-                        overviewInfoCard(
-                            title: "Update the Wallpaper",
-                            subtitle: "Tap \"Update Wallpaper\" to create the latest lock screen image with your current notes.",
-                            icon: "paintbrush"
-                        )
-
-                        overviewInfoCard(
-                            title: "Apply with Shortcuts",
-                            subtitle: "Run the NoteWall shortcut to save the image to Photos and set it as your lock screen.",
-                            icon: "app.badge.checkmark"
-                        )
-                    }
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                Text("Ready to Go")
+                    .font(.system(.largeTitle, design: .rounded))
+                    .fontWeight(.bold)
+                    .padding(.top, 24)
+                
+                Text("You're all set! Start adding notes and updating your wallpaper.")
+                    .font(.system(.title3))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 8)
+                    .padding(.horizontal, 24)
+                
+                Spacer()
+                
+                VStack(spacing: 16) {
+                    overviewInfoCard(
+                        title: "Add Notes",
+                        subtitle: "Capture your thoughts in the Home tab.",
+                        icon: "square.and.pencil"
+                    )
+                    
+                    overviewInfoCard(
+                        title: "Update Wallpaper",
+                        subtitle: "Tap \"Update Wallpaper\" to refresh your lock screen.",
+                        icon: "paintbrush"
+                    )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                overviewAutomationCard
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 36)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .scrollAlwaysBounceIfAvailable()
     }
 
-    private var demoVideoPlaceholder: some View {
+    private func demoVideoSection(minHeight: CGFloat) -> some View {
+        Group {
+            if let player = demoVideoPlayer {
+                VideoPlayer(player: player)
+                    .aspectRatio(9/16, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: minHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.black.opacity(0.08), lineWidth: 0.5)
+                    )
+                    .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
+                    .allowsHitTesting(false)
+                    .onAppear {
+                        player.playImmediately(atRate: demoVideoPlaybackRate)
+                    }
+                    .onDisappear {
+                        player.pause()
+                        player.seek(to: .zero)
+                    }
+                    .accessibilityLabel("NoteWall demo video showing the shortcut flow")
+            } else {
+                demoVideoPlaceholder(minHeight: minHeight)
+            }
+        }
+        .onAppear(perform: prepareDemoVideoPlayerIfNeeded)
+    }
+
+    private func demoVideoPlaceholder(minHeight: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(Color(.systemGray6))
             .overlay(
@@ -595,12 +680,14 @@ struct OnboardingView: View {
                         .foregroundColor(.secondary)
                 }
             )
-            .frame(height: 200)
+            .frame(minHeight: minHeight)
             .accessibilityHidden(true)
     }
 
     private var primaryButtonTitle: String {
         switch currentPage {
+        case .welcome:
+            return "Next"
         case .overview:
             return "Start Using NoteWall"
         case .chooseWallpapers:
@@ -616,6 +703,8 @@ struct OnboardingView: View {
 
     private var primaryButtonIconName: String? {
         switch currentPage {
+        case .welcome:
+            return "arrow.right.circle.fill"
         case .overview:
             return "checkmark.circle.fill"
         case .chooseWallpapers:
@@ -631,6 +720,8 @@ struct OnboardingView: View {
 
     private var primaryButtonEnabled: Bool {
         switch currentPage {
+        case .welcome:
+            return true
         case .installShortcut:
             return true
         case .addNotes:
@@ -658,27 +749,31 @@ struct OnboardingView: View {
     }
 
     private func handlePrimaryButton() {
-        print("🎯 Onboarding: Primary button tapped on page: \(currentPage.progressTitle)")
+        debugLog("🎯 Onboarding: Primary button tapped on page: \(currentPage.progressTitle)")
+        
+        // Light impact haptic for primary button tap
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
         
         // Dismiss keyboard before any transition for smooth animation
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         
         switch currentPage {
+        case .welcome:
+            advanceStep()
         case .installShortcut:
             if didOpenShortcut {
-                print("   → Advancing to add notes")
-                // Small delay to let keyboard dismiss
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     withAnimation(.easeInOut(duration: 0.3)) {
                         self.currentPage = .addNotes
                     }
                 }
             } else {
-                print("   → Opening shortcut installation")
                 installShortcut()
             }
         case .addNotes:
-            print("   → Advancing to wallpaper selection")
+            // Preload video player when moving to step 3 (so it's ready for step 4)
+            prepareNotificationsVideoPlayerIfNeeded()
             // Show loading state
             isLoadingWallpaperStep = true
             // Small delay to let keyboard dismiss and show loading
@@ -692,23 +787,23 @@ struct OnboardingView: View {
                 }
             }
         case .chooseWallpapers:
-            print("   → Starting wallpaper generation and shortcut launch")
             startShortcutLaunch()
         case .allowPermissions:
-            print("   → Advancing to overview")
             advanceStep()
         case .overview:
-            print("   → Completing onboarding")
             completeOnboarding()
         }
     }
 
     private func advanceStep() {
         guard let next = OnboardingPage(rawValue: currentPage.rawValue + 1) else { 
-            print("⚠️ Onboarding: Cannot advance - already at last step")
             return 
         }
-        print("➡️ Onboarding: Advancing from \(currentPage.progressTitle) to \(next.progressTitle)")
+        
+        // Light impact haptic for page transition
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+        
         withAnimation(.easeInOut) {
             currentPage = next
         }
@@ -717,6 +812,11 @@ struct OnboardingView: View {
     private func goBackStep() {
         guard currentPage.rawValue > 0 else { return }
         guard let previous = OnboardingPage(rawValue: currentPage.rawValue - 1) else { return }
+        
+        // Light impact haptic for going back
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+        
         withAnimation(.easeInOut) {
             currentPage = previous
         }
@@ -738,7 +838,9 @@ struct OnboardingView: View {
         }
         // Swipe left to go forward (optional, can be removed if not desired)
         else if horizontalAmount < -50 {
-            if currentPage == .installShortcut && didOpenShortcut {
+            if currentPage == .welcome {
+                advanceStep()
+            } else if currentPage == .installShortcut && didOpenShortcut {
                 currentPage = .chooseWallpapers
             } else if currentPage == .chooseWallpapers && primaryButtonEnabled {
                 startShortcutLaunch()
@@ -749,14 +851,13 @@ struct OnboardingView: View {
     }
 
     private func startShortcutLaunch() {
-        print("🚀 Onboarding: Starting shortcut launch sequence")
         guard !isSavingHomeScreenPhoto, !isSavingLockScreenBackground, !isLaunchingShortcut else { 
-            print("   ⚠️ Cannot start - already in progress")
             return 
         }
-        print("   ✅ Validation passed")
-        print("   📋 Home screen selection: \(homeScreenUsesCustomPhoto ? "Custom Photo" : homeScreenPresetSelectionRaw)")
-        print("   📋 Lock screen mode: \(lockScreenBackgroundModeRaw)")
+        
+        HomeScreenImageManager.prepareStorageStructure()
+        wallpaperVerificationTask?.cancel()
+        wallpaperVerificationTask = nil
         
         // Save notes BEFORE generating wallpaper so ContentView can read them
         saveOnboardingNotes()
@@ -766,10 +867,8 @@ struct OnboardingView: View {
         shortcutLaunchFallback?.cancel()
 
         let fallback = DispatchWorkItem {
-            // Check if we're on chooseWallpapers (Step 2) - if so, we're waiting for shortcut to launch
             if self.currentPage == .chooseWallpapers {
                 if self.isLaunchingShortcut && !self.didTriggerShortcutRun {
-                    print("⏰ Onboarding: Fallback triggered - opening shortcut")
                     self.openShortcutToApplyWallpaper()
                 }
             }
@@ -777,15 +876,26 @@ struct OnboardingView: View {
         shortcutLaunchFallback = fallback
         DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: fallback)
 
-        print("   📤 Posting wallpaper update request")
         finalizeWallpaperSetup()
     }
 
     private func installShortcut() {
         guard let url = URL(string: shortcutURL) else { return }
         UIApplication.shared.open(url) { success in
-            if success {
-                didOpenShortcut = true
+            DispatchQueue.main.async {
+                if success {
+                    didOpenShortcut = true
+                } else {
+                    // NSFileProviderErrorDomain error -1005 can occur due to iCloud/file provider issues
+                    // This is typically a system-level issue, not an app bug
+                    print("⚠️ Onboarding: Shortcut URL open failed. This may be due to:")
+                    print("   - iCloud Drive connectivity issues")
+                    print("   - Pending iCloud terms acceptance")
+                    print("   - Network connectivity problems")
+                    print("   - Shortcuts app privacy settings")
+                    // Don't block the user - they can manually install later
+                    // The error dialog from iOS will inform them
+                }
             }
         }
     }
@@ -794,10 +904,117 @@ struct OnboardingView: View {
         // Save notes to AppStorage before completing
         saveOnboardingNotes()
         
+        // Success notification haptic for completing onboarding
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.success)
+        
         hasCompletedSetup = true
         completedOnboardingVersion = onboardingVersion
         NotificationCenter.default.post(name: .onboardingCompleted, object: nil)
         isPresented = false
+    }
+
+    
+
+    private func prepareDemoVideoPlayerIfNeeded() {
+        guard demoVideoPlayer == nil else { return }
+        guard let bundleURL = Bundle.main.url(forResource: "notewall-demo-video", withExtension: "mov") else {
+            print("⚠️ Onboarding: Demo video not found in bundle")
+            return
+        }
+
+        // Use bundle URL directly - bundle resources are always accessible to AVFoundation
+        // and don't trigger sandbox extension warnings
+        let item = AVPlayerItem(url: bundleURL)
+        let queuePlayer = AVQueuePlayer()
+        let looper = AVPlayerLooper(player: queuePlayer, templateItem: item)
+
+        queuePlayer.isMuted = true
+        queuePlayer.automaticallyWaitsToMinimizeStalling = false
+        queuePlayer.playImmediately(atRate: demoVideoPlaybackRate)
+
+        demoVideoPlayer = queuePlayer
+        demoVideoLooper = looper
+    }
+    
+    private func notificationsVideoSection(minHeight: CGFloat) -> some View {
+        Group {
+            if let player = notificationsVideoPlayer {
+                VideoPlayer(player: player)
+                    .aspectRatio(9/16, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: minHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.black.opacity(0.08), lineWidth: 0.5)
+                    )
+                    .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 6)
+                    .allowsHitTesting(false)
+                    .onAppear {
+                        player.playImmediately(atRate: demoVideoPlaybackRate)
+                    }
+                    .onDisappear {
+                        player.pause()
+                        player.seek(to: .zero)
+                    }
+                    .accessibilityLabel("Notifications demo video")
+            } else {
+                notificationsVideoPlaceholder(minHeight: minHeight)
+            }
+        }
+    }
+    
+    private func notificationsVideoPlaceholder(minHeight: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color(.systemGray6))
+            .overlay(
+                VStack(spacing: 12) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 44))
+                        .foregroundColor(Color.appAccent)
+                    Text("Notifications video loading...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            )
+            .frame(minHeight: minHeight)
+            .accessibilityHidden(true)
+    }
+    
+    private func prepareNotificationsVideoPlayerIfNeeded() {
+        guard notificationsVideoPlayer == nil else {
+            // Player already exists, don't try to play here - let allowPermissionsStep handle it
+            return
+        }
+        
+        guard let bundleURL = Bundle.main.url(forResource: "notifications", withExtension: "mov") else {
+            print("⚠️ Onboarding: Notifications video not found in bundle")
+            // Try to list available resources for debugging
+            if let resourcePath = Bundle.main.resourcePath {
+                print("   Resource path: \(resourcePath)")
+                if let contents = try? FileManager.default.contentsOfDirectory(atPath: resourcePath) {
+                    print("   Available files: \(contents.filter { $0.contains("notification") || $0.contains(".mov") })")
+                }
+            }
+            return
+        }
+        
+        debugLog("✅ Onboarding: Found notifications video in bundle")
+        
+        // Use bundle URL directly - bundle resources are always accessible to AVFoundation
+        // and don't trigger sandbox extension warnings
+        let item = AVPlayerItem(url: bundleURL)
+        let queuePlayer = AVQueuePlayer()
+        let looper = AVPlayerLooper(player: queuePlayer, templateItem: item)
+
+        queuePlayer.isMuted = true
+        queuePlayer.automaticallyWaitsToMinimizeStalling = false
+        queuePlayer.playImmediately(atRate: demoVideoPlaybackRate)
+
+        notificationsVideoPlayer = queuePlayer
+        notificationsVideoLooper = looper
+        notificationsVideoReady = false
     }
     
     private func saveOnboardingNotes() {
@@ -825,40 +1042,120 @@ struct OnboardingView: View {
     }
 
     private func completeShortcutLaunch() {
-        print("✅ Onboarding: Shortcut launch completed")
         shortcutLaunchFallback?.cancel()
         shortcutLaunchFallback = nil
+        wallpaperVerificationTask?.cancel()
+        wallpaperVerificationTask = nil
         guard isLaunchingShortcut else { 
-            print("   ℹ️ Not in launching state, skipping")
             return 
         }
         isLaunchingShortcut = false
         didTriggerShortcutRun = false
         if currentPage == .chooseWallpapers {
-            print("   → Advancing to Allow Permissions step")
             currentPage = .allowPermissions
         }
     }
 
     private func handleWallpaperGenerationFinished() {
-        print("📱 Onboarding: Wallpaper generation finished")
         guard isLaunchingShortcut, currentPage == .chooseWallpapers, !didTriggerShortcutRun else { 
-            print("   Skipping shortcut launch (already triggered or not in onboarding)")
             return 
         }
-        print("   Onboarding opening shortcut now")
         didTriggerShortcutRun = true
         openShortcutToApplyWallpaper()
     }
 
     private func openShortcutToApplyWallpaper() {
+        wallpaperVerificationTask?.cancel()
+        wallpaperVerificationTask = Task {
+            let filesReady = await waitForWallpaperFilesReady()
+            
+            if Task.isCancelled {
+                return
+            }
+            
+            if filesReady {
+                await launchShortcutAfterVerification()
+            } else {
+                await handleWallpaperVerificationFailure()
+            }
+        }
+    }
+
+    private func waitForWallpaperFilesReady(maxWait: TimeInterval = 6.0, pollInterval: TimeInterval = 0.25) async -> Bool {
+        let deadline = Date().addingTimeInterval(maxWait)
+        while Date() < deadline {
+            if Task.isCancelled {
+                return false
+            }
+
+            if areWallpaperFilesReady() {
+                return true
+            }
+
+            let jitter = Double.random(in: 0...0.05)
+            let delay = pollInterval + jitter
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+        return areWallpaperFilesReady()
+    }
+
+    private func areWallpaperFilesReady() -> Bool {
+        guard
+            let homeURL = HomeScreenImageManager.homeScreenImageURL(),
+            let lockURL = HomeScreenImageManager.lockScreenWallpaperURL()
+        else {
+            return false
+        }
+        return isReadableNonZeroFile(at: homeURL) && isReadableNonZeroFile(at: lockURL)
+    }
+
+    private func isReadableNonZeroFile(at url: URL) -> Bool {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: url.path),
+              fileManager.isReadableFile(atPath: url.path) else {
+            return false
+        }
+
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              let fileSize = attributes[.size] as? NSNumber else {
+            return false
+        }
+        return fileSize.intValue > 0
+    }
+
+    @MainActor
+    private func handleWallpaperVerificationFailure() {
+        debugLog("❌ Onboarding: Wallpaper file verification failed or timed out")
+        wallpaperVerificationTask = nil
+        didTriggerShortcutRun = false
+        isLaunchingShortcut = false
+        homeScreenStatusMessage = "We couldn’t prepare the wallpaper files. Tap “Save Lock Screen” again."
+        homeScreenStatusColor = .red
+    }
+
+    @MainActor
+    private func launchShortcutAfterVerification() {
+        wallpaperVerificationTask = nil
+
+        guard areWallpaperFilesReady() else {
+            handleWallpaperVerificationFailure()
+            return
+        }
+
+        debugLog("✅ Onboarding: Wallpaper files verified, opening shortcut")
+
         let shortcutName = "Set NoteWall Wallpaper"
         let encodedName = shortcutName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlString = "shortcuts://run-shortcut?name=\(encodedName)"
-        guard let url = URL(string: urlString) else { return }
-        didTriggerShortcutRun = true
+        guard let url = URL(string: urlString) else {
+            debugLog("❌ Onboarding: Failed to create shortcut URL")
+            handleWallpaperVerificationFailure()
+            return
+        }
+
         UIApplication.shared.open(url, options: [:]) { success in
             if !success {
+                debugLog("⚠️ Onboarding: Shortcut URL open returned false")
                 DispatchQueue.main.async {
                     self.didTriggerShortcutRun = false
                     self.isLaunchingShortcut = false
@@ -1159,6 +1456,8 @@ private struct OnboardingPrimaryButtonStyle: ButtonStyle {
 private extension OnboardingPage {
     var navigationTitle: String {
         switch self {
+        case .welcome:
+            return "Welcome"
         case .installShortcut:
             return "Install Shortcut"
         case .addNotes:
@@ -1174,6 +1473,8 @@ private extension OnboardingPage {
 
     var progressTitle: String {
         switch self {
+        case .welcome:
+            return "Welcome"
         case .installShortcut:
             return "Install Shortcut"
         case .addNotes:
@@ -1189,6 +1490,8 @@ private extension OnboardingPage {
 
     var accessibilityLabel: String {
         switch self {
+        case .welcome:
+            return "Step 0"
         case .installShortcut:
             return "Step 1"
         case .addNotes:
@@ -1261,6 +1564,130 @@ private struct LoadingPlaceholder: View {
                     isAnimating = true
                 }
             }
+    }
+}
+
+// MARK: - Looping Video Player View
+private struct LoopingVideoPlayerView: UIViewRepresentable {
+    let player: AVQueuePlayer
+    let playbackRate: Float
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(player: player, playbackRate: playbackRate)
+    }
+    
+    func makeUIView(context: Context) -> UIView {
+        let view = VideoPlayerContainerView()
+        view.backgroundColor = .black
+        
+        let playerLayer = AVPlayerLayer(player: player)
+        playerLayer.videoGravity = .resizeAspect
+        playerLayer.frame = view.bounds // Set initial frame
+        view.playerLayer = playerLayer
+        view.layer.addSublayer(playerLayer)
+        
+        // Store coordinator
+        context.coordinator.containerView = view
+        context.coordinator.playerLayer = playerLayer
+        
+        // Set up frame and playback
+        DispatchQueue.main.async {
+            playerLayer.frame = view.bounds
+            
+            // Check if item is already ready and play immediately
+            if let currentItem = player.currentItem {
+                if currentItem.status == .readyToPlay && player.rate == 0 {
+                    // Item is ready, play immediately
+                    player.playImmediately(atRate: playbackRate)
+                    print("✅ LoopingVideoPlayerView: Started playing immediately (item already ready)")
+                } else if currentItem.status != .readyToPlay {
+                    // Item not ready yet, set up observer
+                    let coordinator = context.coordinator
+                    coordinator.statusObserver?.invalidate()
+                    let statusObserver = currentItem.observe(\.status, options: [.new]) { [weak player, weak coordinator] item, _ in
+                        guard let player = player, let coordinator = coordinator else { return }
+                        DispatchQueue.main.async {
+                            if item.status == .readyToPlay && player.rate == 0 {
+                                if let containerView = coordinator.containerView,
+                                   let layer = containerView.playerLayer {
+                                    layer.frame = containerView.bounds
+                                }
+                                player.playImmediately(atRate: playbackRate)
+                                print("✅ LoopingVideoPlayerView: Started playing after item became ready")
+                            }
+                        }
+                    }
+                    coordinator.statusObserver = statusObserver
+                }
+            } else {
+                // No current item, try to play anyway (looper should handle it)
+                if player.rate == 0 {
+                    player.playImmediately(atRate: playbackRate)
+                    print("✅ LoopingVideoPlayerView: Started playing (no item check)")
+                }
+            }
+        }
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: UIView, context: Context) {
+        guard let containerView = uiView as? VideoPlayerContainerView,
+              let playerLayer = containerView.playerLayer else {
+            return
+        }
+        
+        // Only update frame - don't try to play here, let allowPermissionsStep handle playback
+        let newFrame = uiView.bounds
+        if playerLayer.frame != newFrame {
+            playerLayer.frame = newFrame
+        }
+    }
+    
+    class Coordinator {
+        let player: AVQueuePlayer
+        let playbackRate: Float
+        weak var containerView: VideoPlayerContainerView?
+        weak var playerLayer: AVPlayerLayer?
+        var statusObserver: NSKeyValueObservation?
+        
+        init(player: AVQueuePlayer, playbackRate: Float) {
+            self.player = player
+            self.playbackRate = playbackRate
+        }
+        
+        deinit {
+            statusObserver?.invalidate()
+        }
+    }
+}
+
+private class VideoPlayerContainerView: UIView {
+    var playerLayer: AVPlayerLayer?
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Ensure player layer frame matches bounds after layout
+        if let playerLayer = playerLayer {
+            let newFrame = bounds
+            if playerLayer.frame != newFrame {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                playerLayer.frame = newFrame
+                CATransaction.commit()
+            }
+        }
+    }
+    
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // When view is added to window, ensure player layer frame is set
+        if window != nil, let playerLayer = playerLayer {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                playerLayer.frame = self.bounds
+            }
+        }
     }
 }
 

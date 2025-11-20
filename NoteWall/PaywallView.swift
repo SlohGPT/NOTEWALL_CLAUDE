@@ -18,6 +18,10 @@ struct PaywallView: View {
     @State private var currentStep = 1  // 1 = plan selection, 2 = trial explanation
     @State private var showTermsAndPrivacy = false
     @State private var selectedLegalDocument: LegalDocumentType = .termsAndPrivacy
+    @State private var promoCode: String = ""
+    @State private var showCodeSuccess = false
+    @State private var showCodeError = false
+    @FocusState private var isCodeFieldFocused: Bool
     
     init(triggerReason: PaywallTriggerReason = .manual, allowDismiss: Bool = true) {
         self.triggerReason = triggerReason
@@ -60,6 +64,43 @@ struct PaywallView: View {
                             .multilineTextAlignment(.leading)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 16)
+                        
+                        // Code input field at the bottom (only for Terms and Privacy)
+                        if selectedLegalDocument == .termsAndPrivacy {
+                            VStack(spacing: 12) {
+                                Divider()
+                                    .padding(.vertical, 8)
+                                
+                                Text("Have a promo code?")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                
+                                HStack(spacing: 12) {
+                                    TextField("Enter code", text: $promoCode)
+                                        .textFieldStyle(.roundedBorder)
+                                        .textInputAutocapitalization(.characters)
+                                        .autocorrectionDisabled()
+                                        .focused($isCodeFieldFocused)
+                                        .submitLabel(.done)
+                                        .onSubmit {
+                                            validateAndApplyCode()
+                                        }
+                                    
+                                    Button(action: validateAndApplyCode) {
+                                        Text("Apply")
+                                            .font(.headline)
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 20)
+                                            .padding(.vertical, 10)
+                                            .background(Color.appAccent)
+                                            .cornerRadius(8)
+                                    }
+                                    .disabled(promoCode.isEmpty)
+                                }
+                                .padding(.horizontal, 20)
+                            }
+                            .padding(.bottom, 20)
+                        }
                     }
                 }
                 .navigationTitle(selectedLegalDocument.title)
@@ -72,6 +113,19 @@ struct PaywallView: View {
                     }
                 }
             }
+        }
+        .alert("Code Applied!", isPresented: $showCodeSuccess) {
+            Button("OK") {
+                showTermsAndPrivacy = false
+                dismiss()
+            }
+        } message: {
+            Text("Lifetime access has been granted. Enjoy NoteWall+!")
+        }
+        .alert("Invalid Code", isPresented: $showCodeError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("The code you entered is not valid. Please check and try again.")
         }
         .onAppear {
             paywallManager.trackPaywallView()
@@ -576,6 +630,35 @@ struct PaywallView: View {
         }
     }
     
+    private func validateAndApplyCode() {
+        // Trim whitespace and convert to uppercase for comparison
+        let trimmedCode = promoCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        
+        // Validate the promo code
+        // Change this code to whatever you want to share with friends
+        let validCode = "FRIEND2024" // You can change this to any code you want
+        
+        if trimmedCode == validCode {
+            // Grant lifetime access
+            paywallManager.grantLifetimeAccess()
+            
+            // Provide haptic feedback
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.success)
+            
+            // Clear the code field
+            promoCode = ""
+            
+            // Show success alert
+            showCodeSuccess = true
+        } else {
+            // Invalid code
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.error)
+            showCodeError = true
+        }
+    }
+    
     // MARK: - Trial Timeline
     
     private struct TimelineEvent: Identifiable {
@@ -787,7 +870,7 @@ struct PaywallView: View {
             
             For questions or support, contact us at: iosnotewall@gmail.com
             
-            Developer: [YOUR FULL LEGAL NAME]
+            Developer: NoteWall Team
             """
         case .privacyPolicy:
             return """
@@ -818,7 +901,7 @@ struct PaywallView: View {
             4. Contact
             
             Email: iosnotewall@gmail.com
-            Developer: [YOUR FULL LEGAL NAME]
+            Developer: NoteWall Team
             """
         case .termsAndPrivacy:
             return """
@@ -860,8 +943,8 @@ struct PaywallView: View {
             
             8. DEVELOPER NAME AND ADDRESS
             
-            Developer Name: [YOUR FULL LEGAL NAME]
-            Address: [YOUR FULL ADDRESS, CITY, POSTAL CODE, SLOVAKIA]
+            Developer Name: NoteWall Team
+            Address: Slovakia
             Email: iosnotewall@gmail.com
             
             Contact information to which any End-User questions, complaints or claims with respect to the Licensed Application should be directed.
@@ -1027,7 +1110,7 @@ struct PaywallView: View {
             If you have questions, concerns, or requests regarding this Privacy Policy or our privacy practices, please contact us:
             
             Email: iosnotewall@gmail.com
-            Developer: [YOUR FULL LEGAL NAME]
+            Developer: NoteWall Team
             
             For EU residents: You also have the right to lodge a complaint with your local data protection authority.
             

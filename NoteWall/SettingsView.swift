@@ -18,7 +18,7 @@ struct SettingsView: View {
     @State private var showPaywall = false
     var selectedTab: Binding<Int>?
 
-    private let shortcutURL = "https://www.icloud.com/shortcuts/a00482ed7b054ee0b42d7d9a7796c7eb"
+    private let shortcutURL = "https://www.icloud.com/shortcuts/5c43e6ec791e4a90b8172bda31243e5c"
     init(selectedTab: Binding<Int>? = nil) {
         self.selectedTab = selectedTab
     }
@@ -40,7 +40,11 @@ struct SettingsView: View {
                 .navigationTitle("Settings")
                 .navigationBarTitleDisplayMode(.large)
                 .alert("Delete All Notes?", isPresented: $showDeleteAlert) {
-                    Button("Cancel", role: .cancel) { }
+                    Button("Cancel", role: .cancel) {
+                        // Light impact haptic for alert dismissal
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                    }
                     Button("Delete", role: .destructive) {
                         deleteAllNotes()
                     }
@@ -48,7 +52,11 @@ struct SettingsView: View {
                     Text("This action cannot be undone. All your notes will be permanently deleted.")
                 }
                 .alert("Reinstall Shortcut?", isPresented: $showResetAlert) {
-                    Button("Cancel", role: .cancel) { }
+                    Button("Cancel", role: .cancel) {
+                        // Light impact haptic for alert dismissal
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                    }
                     Button("Reset & Reinstall", role: .destructive) {
                         resetToFreshInstall()
                     }
@@ -120,11 +128,14 @@ struct SettingsView: View {
                     
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 20))
-                        .foregroundColor(.green)
+                        .foregroundColor(.appAccent)
                 }
                 .padding(.vertical, 8)
             } else {
                 Button(action: {
+                    // Light impact haptic for opening paywall
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
                     showPaywall = true
                 }) {
                     HStack(spacing: 12) {
@@ -157,7 +168,15 @@ struct SettingsView: View {
 
     private var wallpaperSettingsSection: some View {
         Section(header: Text("Wallpaper Settings")) {
-            Toggle(isOn: $skipDeletingOldWallpaper) {
+            Toggle(isOn: Binding(
+                get: { skipDeletingOldWallpaper },
+                set: { newValue in
+                    skipDeletingOldWallpaper = newValue
+                    // Light impact haptic for toggle switch
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                }
+            )) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Skip Deleting Old Wallpapers")
                     Text("When enabled, old wallpapers won't be deleted automatically. This avoids system permission popups.")
@@ -238,6 +257,9 @@ struct SettingsView: View {
     private var actionsSection: some View {
         Section(header: Text("Actions")) {
             Button(action: {
+                // Medium impact haptic for destructive delete action
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
                 showDeleteAlert = true
             }) {
                 HStack {
@@ -250,6 +272,9 @@ struct SettingsView: View {
             }
 
             Button(action: {
+                // Medium impact haptic for destructive reset action
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
                 showResetAlert = true
             }) {
                 HStack {
@@ -320,6 +345,7 @@ struct SettingsView: View {
     }
 
     private func deleteAllNotes() {
+        // Medium impact haptic for destructive delete action (already triggered on button tap, but adding here for confirmation)
         savedNotesData = Data()
         // Switch back to Home tab after deleting notes
         if let selectedTab = selectedTab {
@@ -383,6 +409,10 @@ struct SettingsView: View {
 
     @available(iOS 16.0, *)
     fileprivate func handlePickedHomeScreenData(_ data: Data) {
+        // Light impact haptic for photo picker selection
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+        
         isSavingHomeScreenPhoto = true
         homeScreenStatusMessage = "Saving photo…"
         homeScreenStatusColor = .gray
@@ -462,6 +492,11 @@ private struct UpdateWallpaperButton: View {
 
     private func triggerUpdate() {
         guard !isGenerating else { return }
+        
+        // Light impact haptic for update wallpaper button tap
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+        
         isGenerating = true
         // Settings wallpaper changes do NOT count toward free limit
         let request = WallpaperUpdateRequest(skipDeletionPrompt: false, trackForPaywall: false)
@@ -547,7 +582,7 @@ private extension SettingsView {
             
             For questions or support, contact us at: iosnotewall@gmail.com
             
-            Developer: [YOUR FULL LEGAL NAME]
+            Developer: NoteWall Team
             """
         case .privacyPolicy:
             return """
@@ -578,7 +613,7 @@ private extension SettingsView {
             4. Contact
             
             Email: iosnotewall@gmail.com
-            Developer: [YOUR FULL LEGAL NAME]
+            Developer: NoteWall Team
             """
         case .termsAndPrivacy:
             return """
@@ -622,8 +657,8 @@ private extension SettingsView {
             
             8. DEVELOPER NAME AND ADDRESS
             
-            Developer Name: [YOUR FULL LEGAL NAME]
-            Address: [YOUR FULL ADDRESS, CITY, POSTAL CODE, SLOVAKIA]
+            Developer Name: NoteWall Team
+            Address: Slovakia
             Email: iosnotewall@gmail.com
             
             Contact information to which any End-User questions, complaints or claims with respect to the Licensed Application should be directed.
@@ -789,7 +824,7 @@ private extension SettingsView {
             If you have questions, concerns, or requests regarding this Privacy Policy or our privacy practices, please contact us:
             
             Email: iosnotewall@gmail.com
-            Developer: [YOUR FULL LEGAL NAME]
+            Developer: NoteWall Team
             
             For EU residents: You also have the right to lodge a complaint with your local data protection authority.
             

@@ -195,6 +195,9 @@ struct ContentView: View {
 
         // If the new note wouldn't appear on wallpaper, show alert
         if wouldFitCount < activeNotes.count {
+            // Warning haptic for wallpaper full
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.warning)
             activeAlert = .wallpaperFull
             return
         }
@@ -203,6 +206,10 @@ struct ContentView: View {
         newNoteText = ""
         saveNotes()
         hideKeyboard()
+        
+        // Light impact haptic for successful note addition
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
     }
 
     private static func initialNotes() -> [Note] {
@@ -241,6 +248,10 @@ struct ContentView: View {
         // Update the actual notes array to match the new order
         notes = mutableSortedNotes
         saveNotes()
+        
+        // Light impact haptic for note reordering
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
     }
 
     private func toggleSelection(for note: Note) {
@@ -249,10 +260,17 @@ struct ContentView: View {
         } else {
             selectedNotes.insert(note.id)
         }
+        
+        // Light impact haptic for selecting/deselecting notes
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
     }
 
     private func handleDelete(for note: Note) {
         if let index = notes.firstIndex(where: { $0.id == note.id }) {
+            // Medium impact haptic for destructive delete action
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
             prepareNoteForDeletion(at: index)
         }
     }
@@ -261,6 +279,10 @@ struct ContentView: View {
         if let index = notes.firstIndex(where: { $0.id == note.id }) {
             notes[index].isCompleted.toggle()
             saveNotes()
+            
+            // Light impact haptic for toggling completion
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
         }
     }
 
@@ -377,6 +399,10 @@ struct ContentView: View {
     }
 
     private func deleteSelectedNotes() {
+        // Medium impact haptic for destructive delete action
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
         notes.removeAll { selectedNotes.contains($0.id) }
         selectedNotes.removeAll()
         saveNotes()
@@ -494,9 +520,17 @@ struct ContentView: View {
                         self.lastLockScreenIdentifier = id
                         print("   Photo ID: \(id)")
                     }
+                    
+                    // Success notification haptic for wallpaper generation success
+                    let successGenerator = UINotificationFeedbackGenerator()
+                    successGenerator.notificationOccurred(.success)
                 } else {
                     print("⚠️ Failed to save to Photos library (permission denied or error)")
                     print("   Wallpaper is still saved to file system and can be used by shortcut")
+                    
+                    // Error notification haptic for wallpaper generation failure
+                    let errorGenerator = UINotificationFeedbackGenerator()
+                    errorGenerator.notificationOccurred(.error)
                 }
                 
                 // Track wallpaper export for paywall ONLY if user-initiated from home page
@@ -707,6 +741,9 @@ private struct RootConfiguredModifier: ViewModifier {
                 title: Text("Delete Previous Wallpaper?"),
                 message: Text("To avoid filling your Photos library, NoteWall can delete the previous wallpaper. If you continue, iOS will ask for permission to delete the photo."),
                 primaryButton: .cancel(Text("Skip")) {
+                    // Light impact haptic for alert dismissal
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
                     if let lockScreen = context.pendingLockScreenImage.wrappedValue {
                         // Pass trackForPaywall based on whether this was user-initiated
                         let shouldTrack = context.isUserInitiatedUpdate.wrappedValue
@@ -728,6 +765,9 @@ private struct RootConfiguredModifier: ViewModifier {
                     context.finalizePendingDeletion()
                 },
                 secondaryButton: .cancel {
+                    // Light impact haptic for alert dismissal
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
                     context.restorePendingDeletionIfNeeded()
                 }
             )
@@ -738,13 +778,21 @@ private struct RootConfiguredModifier: ViewModifier {
                 primaryButton: .destructive(Text("Delete")) {
                     context.deleteSelectedNotes()
                 },
-                secondaryButton: .cancel()
+                secondaryButton: .cancel {
+                    // Light impact haptic for alert dismissal
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                }
             )
         case .wallpaperFull:
             return Alert(
                 title: Text("Wallpaper Full"),
                 message: Text("Your wallpaper has reached its maximum capacity. Complete or delete existing notes to add new ones."),
-                dismissButton: .cancel(Text("OK"))
+                dismissButton: .cancel(Text("OK")) {
+                    // Light impact haptic for alert dismissal
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                }
             )
         }
     }
@@ -911,6 +959,11 @@ private struct EditModeMenuButton: View {
     private func toggleEditMode() {
         guard !context.notes.wrappedValue.isEmpty else { return }
         context.hideKeyboard()
+        
+        // Light impact haptic for entering/exiting edit mode
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+        
         withAnimation(.easeInOut(duration: 0.25)) {
             context.isEditMode.wrappedValue.toggle()
             if !context.isEditMode.wrappedValue {
@@ -1090,6 +1143,10 @@ private struct UpdateWallpaperButtonView: View {
                 paywallManager.showPaywall(reason: .limitReached)
                 return
             }
+            
+            // Light impact haptic for update wallpaper button tap
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
             
             // Mark as user-initiated from homepage - this will consume a credit
             context.isUserInitiatedUpdate.wrappedValue = true
