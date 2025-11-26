@@ -8,6 +8,7 @@ struct ContentView: View {
     @AppStorage("skipDeletingOldWallpaper") private var skipDeletingOldWallpaper = false
     @AppStorage("autoUpdateWallpaperAfterDeletion") private var autoUpdateWallpaperAfterDeletionRaw: String = ""
     @AppStorage("hasShownAutoUpdatePrompt") private var hasShownAutoUpdatePrompt = false
+    @AppStorage("saveWallpapersToPhotos") private var saveWallpapersToPhotos = false
     
     // Computed property for auto-update preference (nil = not set, true/false = user choice)
     private var autoUpdateWallpaperAfterDeletion: Bool? {
@@ -46,6 +47,9 @@ struct ContentView: View {
     @State private var isUserInitiatedUpdate = false
     @State private var showTroubleshooting = false
     @State private var shouldRestartOnboarding = false
+    @State private var showWallpaperUpdateLoading = false
+    @AppStorage("hasShownFirstNoteHint") private var hasShownFirstNoteHint = false
+    @State private var showFirstNoteHint = false
     @FocusState private var isTextFieldFocused: Bool
 
     // Computed property to get indices of notes that will appear on wallpaper
@@ -141,14 +145,35 @@ struct ContentView: View {
     }
 
     var body: some View {
-        AnyView(ContentViewRoot(context: viewContext))
-            .onChange(of: shouldRestartOnboarding) { shouldRestart in
-                if shouldRestart {
-                    // Reset hasCompletedSetup to force onboarding to show
-                    hasCompletedSetup = false
-                    shouldRestartOnboarding = false
+        ZStack {
+            AnyView(ContentViewRoot(context: viewContext))
+                .onChange(of: shouldRestartOnboarding) { shouldRestart in
+                    if shouldRestart {
+                        // Reset hasCompletedSetup to force onboarding to show
+                        hasCompletedSetup = false
+                        shouldRestartOnboarding = false
+                    }
                 }
+                .onChange(of: showWallpaperUpdateLoading) { isShowing in
+                    // Reset generating state when overlay is dismissed
+                    if !isShowing {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            isGeneratingWallpaper = false
+                            isUserInitiatedUpdate = false
+                        }
+                    }
+                }
+            
+            // Wallpaper update loading overlay
+            if showWallpaperUpdateLoading {
+                WallpaperUpdateLoadingView(
+                    isPresented: $showWallpaperUpdateLoading,
+                    showTroubleshooting: $showTroubleshooting
+                )
+                .id("wallpaperUpdateLoading")
+                .zIndex(1000)
             }
+        }
     }
 
     private var viewContext: ContentViewContext {
@@ -167,6 +192,8 @@ struct ContentView: View {
             shouldShowTroubleshootingBanner: $shouldShowTroubleshootingBanner,
             showTroubleshooting: $showTroubleshooting,
             shouldRestartOnboarding: $shouldRestartOnboarding,
+            showWallpaperUpdateLoading: $showWallpaperUpdateLoading,
+            showFirstNoteHint: $showFirstNoteHint,
             isTextFieldFocused: $isTextFieldFocused,
             addNote: addNote,
             moveNotes: moveNotes,
@@ -238,10 +265,22 @@ struct ContentView: View {
             return
         }
 
+        // Track if this is the first note added after onboarding
+        let wasFirstNoteAfterOnboarding = !hasShownFirstNoteHint && hasCompletedSetup
+        
         notes.append(newNote)
         newNoteText = ""
         saveNotes()
         hideKeyboard()
+        
+        // Show hint after first note added after onboarding (only once)
+        if wasFirstNoteAfterOnboarding {
+            hasShownFirstNoteHint = true
+            // Small delay to let the note appear first
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                showFirstNoteHint = true
+            }
+        }
         
         // Light impact haptic for successful note addition
         let generator = UIImpactFeedbackGenerator(style: .light)
@@ -528,10 +567,12 @@ struct ContentView: View {
 
         // Delete previous wallpaper if it exists and user hasn't opted to skip
         // Also skip if this update was triggered from Settings (e.g., preset selection)
+        // ALSO skip if user opted for "Files Only" (no Photos library saves)
         let shouldPromptForDeletion = !skipDeletingOldWallpaper &&
             !lastLockScreenIdentifier.isEmpty &&
             hasCompletedInitialWallpaperSetup &&
-            !shouldSkipDeletionPrompt
+            !shouldSkipDeletionPrompt &&
+            saveWallpapersToPhotos // Only prompt if user is saving to Photos
 
         if shouldPromptForDeletion {
             withAnimation {
@@ -680,6 +721,8 @@ private struct ContentViewContext {
     let shouldShowTroubleshootingBanner: Binding<Bool>
     let showTroubleshooting: Binding<Bool>
     let shouldRestartOnboarding: Binding<Bool>
+    let showWallpaperUpdateLoading: Binding<Bool>
+    let showFirstNoteHint: Binding<Bool>
     let isTextFieldFocused: FocusState<Bool>.Binding
     let addNote: () -> Void
     let moveNotes: (IndexSet, Int) -> Void
@@ -796,12 +839,21 @@ private struct RootConfiguredModifier: ViewModifier {
                     context.pendingLockScreenImage.wrappedValue = nil
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: .appResetToFreshInstall)) { _ in
-                // Force reload notes after app reset
-                context.loadNotes()
-            }
             .onChange(of: context.savedNotesData.wrappedValue) { _ in
+                let previousNotesCount = context.notes.wrappedValue.count
                 context.loadNotes()
+                
+                // If notes became empty after loading and we had notes before, update to blank wallpaper
+                if previousNotesCount > 0 && context.notes.wrappedValue.isEmpty && context.hasCompletedSetup {
+                    // Small delay to ensure notes array is fully updated
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        // Check again to be sure notes are still empty, then trigger wallpaper update
+                        if context.notes.wrappedValue.isEmpty {
+                            // This will call setBlankWallpaper() which generates and saves blank wallpaper
+                            context.handleNotesChangedAfterDeletion()
+                        }
+                    }
+                }
             }
     }
 
@@ -1000,6 +1052,11 @@ private struct NotesListView: View {
                 context.moveNotes(source, destination)
             }
 
+            // First note hint banner (shown after first note added)
+            if context.showFirstNoteHint.wrappedValue && !context.isEditMode.wrappedValue {
+                FirstNoteHintBannerView(context: context)
+            }
+            
             // Troubleshooting banner appears after notes
             if context.shouldShowTroubleshootingBanner.wrappedValue && !context.isEditMode.wrappedValue {
                 TroubleshootingBannerView(context: context)
@@ -1252,14 +1309,18 @@ private struct UpdateWallpaperButtonView: View {
             
             // Mark as user-initiated from homepage - this will consume a credit
             context.isUserInitiatedUpdate.wrappedValue = true
+            
+            // Show loading overlay for user-initiated updates
+            context.showWallpaperUpdateLoading.wrappedValue = true
+            
             context.updateWallpaper()
         }) {
             HStack {
-                if context.isGeneratingWallpaper.wrappedValue {
+                if context.isGeneratingWallpaper.wrappedValue && !context.showWallpaperUpdateLoading.wrappedValue {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
                 }
-                Text(context.isGeneratingWallpaper.wrappedValue ? "Generating..." : "Update Wallpaper")
+                Text(context.isGeneratingWallpaper.wrappedValue && !context.showWallpaperUpdateLoading.wrappedValue ? "Generating..." : "Update Wallpaper")
                     .fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity)
@@ -1318,13 +1379,24 @@ struct NoteRowView: View {
                     .buttonStyle(.plain)
                 }
 
-                TextField("Note", text: $note.text)
-                    .submitLabel(.done)
-                    .textFieldStyle(.plain)
-                    .foregroundColor(note.isCompleted ? .gray : .primary)
-                    .onSubmit(onCommit)
-                    .disabled(isEditMode)
-                    .accentStrikethrough(note.isCompleted)
+                ZStack(alignment: .center) {
+                    AutoScrollingTextField(
+                        text: $note.text,
+                        placeholder: "Note",
+                        textColor: note.isCompleted ? UIColor.systemGray : UIColor.label,
+                        font: UIFont.preferredFont(forTextStyle: .body),
+                        isDisabled: isEditMode,
+                        onCommit: onCommit
+                    )
+
+                    if note.isCompleted {
+                        Rectangle()
+                            .fill(Color.appAccent)
+                            .frame(height: 1.5)
+                            .opacity(0.9)
+                            .allowsHitTesting(false)
+                    }
+                }
 
                 Spacer(minLength: 0)
 
@@ -1376,6 +1448,76 @@ struct NoteRowView: View {
     }
 }
 
+/// Single-line text field that shows truncated text with ellipsis when idle,
+/// then scrolls horizontally to reveal the end when you tap to edit.
+struct AutoScrollingTextField: UIViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let textColor: UIColor
+    let font: UIFont
+    let isDisabled: Bool
+    let onCommit: () -> Void
+    
+    func makeUIView(context: Context) -> UITextField {
+        let textField = UITextField()
+        textField.delegate = context.coordinator
+        textField.backgroundColor = .clear
+        textField.borderStyle = .none
+        textField.returnKeyType = .done
+        textField.adjustsFontSizeToFitWidth = false
+        textField.addTarget(context.coordinator, action: #selector(Coordinator.textDidChange), for: .editingChanged)
+        textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return textField
+    }
+    
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        // Sync text
+        if uiView.text != text {
+            uiView.text = text
+        }
+        uiView.placeholder = placeholder
+        uiView.textColor = textColor
+        uiView.font = font
+        uiView.isEnabled = !isDisabled
+        uiView.alpha = isDisabled ? 0.5 : 1.0
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        private let parent: AutoScrollingTextField
+        
+        init(_ parent: AutoScrollingTextField) {
+            self.parent = parent
+        }
+        
+        @objc func textDidChange(_ textField: UITextField) {
+            parent.text = textField.text ?? ""
+        }
+        
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            parent.onCommit()
+            textField.resignFirstResponder()
+            return false
+        }
+        
+        func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
+            !parent.isDisabled
+        }
+        
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            // Move cursor to the end
+            DispatchQueue.main.async {
+                let endPosition = textField.endOfDocument
+                textField.selectedTextRange = textField.textRange(from: endPosition, to: endPosition)
+            }
+        }
+    }
+}
+
 private struct TroubleshootingBannerView: View {
     let context: ContentViewContext
     @State private var isTemporarilyHidden = false
@@ -1404,6 +1546,10 @@ private struct TroubleshootingBannerView: View {
                         Spacer()
                         
                         Button(action: {
+                            // Light impact haptic for dismissing banner
+                            let generator = UIImpactFeedbackGenerator(style: .light)
+                            generator.impactOccurred()
+                            
                             withAnimation {
                                 isTemporarilyHidden = true
                             }
@@ -1416,6 +1562,9 @@ private struct TroubleshootingBannerView: View {
                     }
                     
                     Button(action: {
+                        // Medium impact haptic for opening troubleshooting
+                        let generator = UIImpactFeedbackGenerator(style: .medium)
+                        generator.impactOccurred()
                         context.showTroubleshooting.wrappedValue = true
                     }) {
                         HStack {
@@ -1446,6 +1595,74 @@ private struct TroubleshootingBannerView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.appAccent.opacity(0.08))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(Color.appAccent.opacity(0.2), lineWidth: 1)
+                        )
+                )
+                .padding(.horizontal, 16)
+                .padding(.top, 20)
+                .padding(.bottom, 8)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .transition(.asymmetric(
+                    insertion: .scale.combined(with: .opacity),
+                    removal: .scale.combined(with: .opacity)
+                ))
+            }
+        }
+    }
+}
+
+private struct FirstNoteHintBannerView: View {
+    let context: ContentViewContext
+    @State private var isDismissed = false
+    
+    var body: some View {
+        Group {
+            if !isDismissed {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 24))
+                            .foregroundColor(.appAccent)
+                        
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Great! You added your first note")
+                                .font(.system(.headline, design: .rounded))
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                            
+                            Text("Add more notes using the + button, then tap \"Update Wallpaper\" to apply them to your lock screen.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            // Light impact haptic for dismissing banner
+                            let generator = UIImpactFeedbackGenerator(style: .light)
+                            generator.impactOccurred()
+                            
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                isDismissed = true
+                                context.showFirstNoteHint.wrappedValue = false
+                            }
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(.secondary.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 .padding(16)
                 .background(

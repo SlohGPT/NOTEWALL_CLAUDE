@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("savedNotes") private var savedNotesData: Data = Data()
     @AppStorage("skipDeletingOldWallpaper") private var skipDeletingOldWallpaper = false
     @AppStorage("autoUpdateWallpaperAfterDeletion") private var autoUpdateWallpaperAfterDeletionRaw: String = ""
+    @AppStorage("saveWallpapersToPhotos") private var saveWallpapersToPhotos = false
     
     // Computed property for auto-update preference
     private var autoUpdateWallpaperAfterDeletion: Bool? {
@@ -38,8 +39,8 @@ struct SettingsView: View {
     @State private var shouldRestartOnboarding = false
     var selectedTab: Binding<Int>?
 
-    private let shortcutURL = "https://www.icloud.com/shortcuts/5c43e6ec791e4a90b8172bda31243e5c"
-    private let testFlightShortcutURL = "https://www.icloud.com/shortcuts/1c815657ac7c446a996d505032471cea"
+    private let shortcutURL = "https://www.icloud.com/shortcuts/37aa5bd3a1274af1b502c8eeda60fbf7"
+    private let testFlightShortcutURL = "https://www.icloud.com/shortcuts/37aa5bd3a1274af1b502c8eeda60fbf7"
     
     // Detect if running from TestFlight
     private var isTestFlightBuild: Bool {
@@ -235,6 +236,62 @@ struct SettingsView: View {
 
     private var wallpaperSettingsSection: some View {
         Section(header: Text("Wallpaper Settings")) {
+            if autoUpdateWallpaperAfterDeletion != nil {
+                Toggle(isOn: Binding(
+                    get: { autoUpdateWallpaperAfterDeletion ?? false },
+                    set: { newValue in
+                        autoUpdateWallpaperAfterDeletionRaw = newValue ? "true" : "false"
+                        // When switching to automatic, also disable Photos library
+                        if newValue {
+                            saveWallpapersToPhotos = false
+                        }
+                        // Light impact haptic for toggle switch
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Automatic")
+                            if autoUpdateWallpaperAfterDeletion ?? false {
+                                Text("Recommended")
+                                    .font(.caption2)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.appAccent)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.appAccent.opacity(0.1))
+                                    .cornerRadius(4)
+                            }
+                        }
+                        Text((autoUpdateWallpaperAfterDeletion ?? false) ? "Wallpaper updates automatically when you delete notes. Zero popups." : "You manually update wallpaper using the Update button.")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            
+            Toggle(isOn: Binding(
+                get: { saveWallpapersToPhotos },
+                set: { newValue in
+                    saveWallpapersToPhotos = newValue
+                    // When enabling Photos library, disable automatic updates
+                    if newValue && (autoUpdateWallpaperAfterDeletion ?? false) {
+                        autoUpdateWallpaperAfterDeletionRaw = "false"
+                    }
+                    // Light impact haptic for toggle switch
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Save to Photos Library")
+                    Text(saveWallpapersToPhotos ? "Wallpapers saved to Photos and Files. May see popups." : "Wallpapers saved to Files only. Clean Photos library.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+            
             Toggle(isOn: Binding(
                 get: { skipDeletingOldWallpaper },
                 set: { newValue in
@@ -251,25 +308,8 @@ struct SettingsView: View {
                         .foregroundColor(.gray)
                 }
             }
-            
-            if autoUpdateWallpaperAfterDeletion != nil {
-                Toggle(isOn: Binding(
-                    get: { autoUpdateWallpaperAfterDeletion ?? false },
-                    set: { newValue in
-                        autoUpdateWallpaperAfterDeletionRaw = newValue ? "true" : "false"
-                        // Light impact haptic for toggle switch
-                        let generator = UIImpactFeedbackGenerator(style: .light)
-                        generator.impactOccurred()
-                    }
-                )) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Auto-Update After Deletion")
-                        Text("When enabled, your lock screen wallpaper will automatically update when you delete notes.")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                }
-            }
+            .opacity(saveWallpapersToPhotos ? 1 : 0.5)
+            .disabled(!saveWallpapersToPhotos)
         }
     }
 
@@ -372,25 +412,6 @@ struct SettingsView: View {
                 }
             }
             
-            // MARK: - TESTING ONLY: Reset App Button
-            // TODO: Remove this before production release
-            #if DEBUG
-            Button(action: {
-                // Medium impact haptic
-                let generator = UIImpactFeedbackGenerator(style: .medium)
-                generator.impactOccurred()
-                NotificationCenter.default.post(name: .requestAppReset, object: nil)
-            }) {
-                HStack {
-                    Text("🧪 Reset to Fresh Install (Testing)")
-                        .foregroundColor(.orange)
-                    Spacer()
-                    Image(systemName: "arrow.counterclockwise")
-                        .foregroundColor(.orange)
-                }
-            }
-            #endif
-            
             Button(action: {
                 showTroubleshooting = true
             }) {
@@ -435,8 +456,9 @@ struct SettingsView: View {
             }
             
             Button(action: {
-                selectedLegalDocument = .privacyPolicy
-                showLegalDocument = true
+                if let url = URL(string: "https://peat-appendix-c3c.notion.site/PRIVACY-POLICY-2b7f6a63758f804cab16f58998d7787e?source=copy_link") {
+                    UIApplication.shared.open(url)
+                }
             }) {
                 HStack {
                     Text("Privacy Policy")
@@ -479,6 +501,8 @@ struct SettingsView: View {
         // 1. Clear all AppStorage values
         savedNotesData = Data()
         skipDeletingOldWallpaper = false
+        saveWallpapersToPhotos = false
+        autoUpdateWallpaperAfterDeletionRaw = ""
         lockScreenBackgroundRaw = LockScreenBackgroundOption.default.rawValue
         lockScreenBackgroundModeRaw = LockScreenBackgroundMode.default.rawValue
         lockScreenBackgroundPhotoData = Data()
@@ -490,6 +514,8 @@ struct SettingsView: View {
         // Clear other AppStorage keys that might exist
         UserDefaults.standard.removeObject(forKey: "lastLockScreenIdentifier")
         UserDefaults.standard.removeObject(forKey: "hasCompletedInitialWallpaperSetup")
+        UserDefaults.standard.removeObject(forKey: "hasShownAutoUpdatePrompt")
+        UserDefaults.standard.removeObject(forKey: "hasShownFirstNoteHint")
         
         // Reset paywall data for fresh install
         PaywallManager.shared.resetForFreshInstall()

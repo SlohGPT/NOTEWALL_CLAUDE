@@ -129,6 +129,10 @@ struct TroubleshootingView: View {
                 // Back button (when not on start)
                 if currentStep != .start {
                     Button(action: {
+                        // Light impact haptic for back button
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                        
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                             animateIn = false
                         }
@@ -162,6 +166,9 @@ struct TroubleshootingView: View {
                 
                 // Close button
                 Button(action: {
+                    // Light impact haptic for close button
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
                     isPresented = false
                 }) {
                     Image(systemName: "xmark")
@@ -217,42 +224,10 @@ struct TroubleshootingView: View {
         VStack(spacing: 0) {
             Spacer()
             
-            // Animated icon
-            ZStack {
-                // Outer pulsing rings
-                ForEach(0..<3, id: \.self) { i in
-                    Circle()
-                        .stroke(Color.appAccent.opacity(0.2), lineWidth: 1)
-                        .frame(width: 140 + CGFloat(i) * 35, height: 140 + CGFloat(i) * 35)
-                        .scaleEffect(pulseAnimation ? 1.1 : 1.0)
-                        .opacity(pulseAnimation ? 0.3 : 0.6)
-                        .animation(
-                            Animation.easeInOut(duration: 2)
-                                .repeatForever(autoreverses: true)
-                                .delay(Double(i) * 0.2),
-                            value: pulseAnimation
-                        )
-                }
-                
-                // Main icon container
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                                colors: [Color.appAccent.opacity(0.25), Color.appAccent.opacity(0.1)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 120, height: 120)
-                
-                Image(systemName: "wrench.and.screwdriver.fill")
-                        .font(.system(size: 48, weight: .medium))
-                    .foregroundColor(.appAccent)
-                        .shadow(color: Color.appAccent.opacity(0.5), radius: 10, x: 0, y: 5)
-                }
-                .offset(y: floatOffset)
-            }
+            TroubleshootingHeroIcon(
+                systemName: "wrench.and.screwdriver.fill",
+                floatAmplitude: abs(floatOffset)
+            )
             .frame(height: 220)
             .opacity(animateIn ? 1 : 0)
             .scaleEffect(animateIn ? 1 : 0.8)
@@ -277,6 +252,10 @@ struct TroubleshootingView: View {
             
             // CTA Button
             Button(action: {
+                // Medium impact haptic for starting troubleshooting
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
+                
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                     animateIn = false
                 }
@@ -500,6 +479,10 @@ struct TroubleshootingView: View {
                 .animation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.35), value: animateIn)
                 
                 Button(action: {
+                    // Light impact haptic for navigation button
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                    
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                         animateIn = false
                     }
@@ -588,12 +571,12 @@ struct TroubleshootingView: View {
                     HStack(spacing: 12) {
                         ZStack {
                             Circle()
-                                .fill(Color.purple.opacity(0.15))
+                                .fill(Color.orange.opacity(0.15))
                                 .frame(width: 40, height: 40)
                             
                             Image(systemName: "photo.on.rectangle.angled")
                                 .font(.system(size: 18))
-                                .foregroundColor(.purple)
+                                .foregroundColor(.orange)
                         }
                         
                         Text("The Problem")
@@ -628,12 +611,12 @@ struct TroubleshootingView: View {
                     HStack(spacing: 12) {
                         ZStack {
                             Circle()
-                                .fill(Color.green.opacity(0.15))
+                                .fill(Color.appAccent.opacity(0.15))
                                 .frame(width: 40, height: 40)
                             
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 18))
-                                .foregroundColor(.green)
+                                .foregroundColor(.appAccent)
                         }
                         
                         Text("Quick Fix")
@@ -642,7 +625,7 @@ struct TroubleshootingView: View {
                     }
                     
                     VStack(alignment: .leading, spacing: 12) {
-                        solutionStep(number: 1, text: "Swipe down on your Lock Screen")
+                        solutionStep(number: 1, text: "Swipe down to your Lock Screen")
                         solutionStep(number: 2, text: "Long-press on your wallpaper")
                         solutionStep(number: 3, text: "Select the one with notes")
                     }
@@ -651,10 +634,10 @@ struct TroubleshootingView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(Color.green.opacity(0.08))
+                        .fill(Color.appAccent.opacity(0.08))
                         .overlay(
                             RoundedRectangle(cornerRadius: 16)
-                                .stroke(Color.green.opacity(0.2), lineWidth: 1)
+                                .stroke(Color.appAccent.opacity(0.2), lineWidth: 1)
                         )
                 )
                 .opacity(animateIn ? 1 : 0)
@@ -703,6 +686,10 @@ struct TroubleshootingView: View {
                 .animation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.35), value: animateIn)
                 
                 Button(action: {
+                    // Light impact haptic for navigation button
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                    
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                         animateIn = false
                     }
@@ -760,41 +747,10 @@ struct TroubleshootingView: View {
         VStack(spacing: 0) {
             Spacer()
             
-            // Animated icon
-            ZStack {
-                // Pulsing rings
-                ForEach(0..<2, id: \.self) { i in
-                    Circle()
-                        .stroke(Color.appAccent.opacity(0.2), lineWidth: 1)
-                        .frame(width: 130 + CGFloat(i) * 30, height: 130 + CGFloat(i) * 30)
-                        .scaleEffect(pulseAnimation ? 1.08 : 1.0)
-                        .opacity(pulseAnimation ? 0.4 : 0.7)
-                        .animation(
-                            Animation.easeInOut(duration: 2)
-                                .repeatForever(autoreverses: true)
-                                .delay(Double(i) * 0.15),
-                            value: pulseAnimation
-                        )
-                }
-            
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                                colors: [Color.appAccent.opacity(0.2), Color.appAccent.opacity(0.08)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                        .frame(width: 110, height: 110)
-                
-                    Image(systemName: "headphones.circle.fill")
-                        .font(.system(size: 50))
-                    .foregroundColor(.appAccent)
-                        .shadow(color: Color.appAccent.opacity(0.4), radius: 10, x: 0, y: 5)
-                }
-                .offset(y: floatOffset)
-            }
+            TroubleshootingHeroIcon(
+                systemName: "headphones",
+                floatAmplitude: abs(floatOffset)
+            )
             .frame(height: 200)
             .opacity(animateIn ? 1 : 0)
             .scaleEffect(animateIn ? 1 : 0.8)
@@ -821,6 +777,10 @@ struct TroubleshootingView: View {
             VStack(spacing: 14) {
                 // Email button
                 Button(action: {
+                    // Light impact haptic for opening email
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                    
                     if let url = URL(string: "mailto:support@notewall.app") {
                         UIApplication.shared.open(url)
                     }
@@ -868,6 +828,10 @@ struct TroubleshootingView: View {
                 
                 // Twitter button
                 Button(action: {
+                    // Light impact haptic for opening Twitter
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
+                    
                     if let url = URL(string: "https://twitter.com/notewall") {
                         UIApplication.shared.open(url)
                     }
@@ -915,6 +879,9 @@ struct TroubleshootingView: View {
                 
                 // Close button
                 Button(action: {
+                    // Light impact haptic for close button
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.impactOccurred()
                     isPresented = false
                 }) {
                     Text("Close")
@@ -951,6 +918,61 @@ private enum TroubleshootingStep {
     case issue1
     case issue2
     case support
+}
+
+private struct TroubleshootingHeroIcon: View {
+    let systemName: String
+    let floatAmplitude: CGFloat
+    var iconFontSize: CGFloat = 48
+    
+    @State private var animateRings = false
+    @State private var floatingOffset: CGFloat = 0
+    
+    var body: some View {
+        ZStack {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .stroke(Color.appAccent.opacity(0.2), lineWidth: 1)
+                    .frame(width: 140 + CGFloat(i) * 35, height: 140 + CGFloat(i) * 35)
+                    .scaleEffect(animateRings ? 1.1 : 1.0)
+                    .opacity(animateRings ? 0.3 : 0.6)
+                    .animation(
+                        Animation.easeInOut(duration: 2)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(i) * 0.2),
+                        value: animateRings
+                    )
+            }
+            
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.appAccent.opacity(0.25), Color.appAccent.opacity(0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 120, height: 120)
+                
+                Image(systemName: systemName)
+                    .font(.system(size: iconFontSize, weight: .medium))
+                    .foregroundColor(.appAccent)
+                    .shadow(color: Color.appAccent.opacity(0.5), radius: 10, x: 0, y: 5)
+            }
+            .offset(y: floatingOffset)
+        }
+        .onAppear {
+            DispatchQueue.main.async {
+                withAnimation(Animation.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
+                    animateRings = true
+                }
+                withAnimation(Animation.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
+                    floatingOffset = -abs(floatAmplitude)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Preview

@@ -8,12 +8,43 @@ struct LegalDocumentView: View {
         NavigationView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text(documentContent)
-                        .font(.system(.body, design: .default))
-                        .foregroundColor(.primary)
-                        .multilineTextAlignment(.leading)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
+                    if documentType == .privacyPolicy {
+                        VStack(spacing: 20) {
+                            Text("Privacy Policy")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .padding(.top, 20)
+                            
+                            Text("Your Privacy Policy is hosted online.")
+                                .font(.body)
+                                .foregroundColor(.secondary)
+                            
+                            Button(action: {
+                                if let url = URL(string: "https://peat-appendix-c3c.notion.site/PRIVACY-POLICY-2b7f6a63758f804cab16f58998d7787e?source=copy_link") {
+                                    UIApplication.shared.open(url)
+                                }
+                            }) {
+                                HStack {
+                                    Text("Open Privacy Policy")
+                                        .fontWeight(.semibold)
+                                    Image(systemName: "arrow.up.right.square")
+                                }
+                                .foregroundColor(.white)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.appAccent)
+                                .cornerRadius(12)
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                    } else {
+                        Text(documentContent)
+                            .font(.system(.body, design: .default))
+                            .foregroundColor(.primary)
+                            .multilineTextAlignment(.leading)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                    }
                 }
             }
             .navigationTitle(documentType.title)
@@ -26,6 +57,16 @@ struct LegalDocumentView: View {
                 }
             }
         }
+        .onAppear {
+            // If privacy policy, open URL immediately
+            if documentType == .privacyPolicy {
+                if let url = URL(string: "https://peat-appendix-c3c.notion.site/PRIVACY-POLICY-2b7f6a63758f804cab16f58998d7787e?source=copy_link") {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+            }
+        }
     }
     
     private var documentContent: String {
@@ -33,7 +74,7 @@ struct LegalDocumentView: View {
         case .termsOfService:
             return termsOfServiceContent
         case .privacyPolicy:
-            return privacyPolicyContent
+            return "" // Handled in body
         case .termsAndPrivacy:
             return termsAndPrivacyContent
         }

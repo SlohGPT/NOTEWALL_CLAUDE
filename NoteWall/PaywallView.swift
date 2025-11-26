@@ -269,8 +269,8 @@ struct PaywallView: View {
     private var step1PlanSelection: some View {
         paywallScrollView {
         VStack(spacing: 20) {
-                // Close button + hero
-                HStack(alignment: .top) {
+                // Close button at top
+                HStack {
                     Spacer()
                     Button(action: {
                         paywallManager.trackPaywallDismiss()
@@ -368,8 +368,9 @@ struct PaywallView: View {
                     .foregroundColor(.secondary)
 
                     Button("Privacy") {
-                        selectedLegalDocument = .privacyPolicy
-                        showTermsAndPrivacy = true
+                        if let url = URL(string: "https://peat-appendix-c3c.notion.site/PRIVACY-POLICY-2b7f6a63758f804cab16f58998d7787e?source=copy_link") {
+                            UIApplication.shared.open(url)
+                        }
                     }
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -704,7 +705,11 @@ struct PaywallView: View {
     }
     
     private var primaryPackages: [Package] {
-        availablePackages.filter { planKind(for: $0) != .lifetime }
+        // Only show Monthly and Yearly in main paywall (exclude Lifetime)
+        availablePackages.filter { 
+            let kind = planKind(for: $0)
+            return kind == .monthly || kind == .yearly
+        }
     }
     
     private var sortedPrimaryPackages: [Package] {
@@ -751,7 +756,15 @@ struct PaywallView: View {
     }
     
     private var lifetimeFallbackPlan: FallbackPlan? {
-        fallbackPlans.first { $0.kind == .lifetime }
+        // Return hardcoded lifetime plan for the separate sheet
+        FallbackPlan(
+            kind: .lifetime,
+            label: "Lifetime",
+            subtitle: "One-time purchase, own NoteWall+ forever",
+            priceText: "€24.99",
+            highlight: false,
+            trialDays: nil
+        )
     }
     
     private var lifetimePriceText: String {
@@ -778,16 +791,8 @@ struct PaywallView: View {
                 label: "Yearly",
                 subtitle: "",
                 priceText: "€14.99",
-                highlight: false,
+                highlight: true,
                 trialDays: 7
-            ),
-            FallbackPlan(
-                kind: .lifetime,
-                label: "Lifetime",
-                subtitle: "One-time purchase, own NoteWall+ forever",
-                priceText: "€24.99",
-                highlight: false,
-                trialDays: nil
             ),
             FallbackPlan(
                 kind: .monthly,
@@ -795,7 +800,7 @@ struct PaywallView: View {
                 subtitle: "",
                 priceText: "€6.99",
                 highlight: false,
-                trialDays: 3
+                trialDays: 7
             )
         ]
     }
@@ -819,14 +824,34 @@ struct PaywallView: View {
     }
     
     private func fallbackPricingCard(plan: FallbackPlan, index: Int) -> some View {
-        selectablePricingCard(
+        let perMonthText: String?
+        if plan.kind == .monthly {
+            perMonthText = "\(plan.priceText)/mo"
+        } else if plan.kind == .yearly {
+            // Calculate per month for yearly: €14.99 / 12 = €1.25/mo
+            perMonthText = "€1.25/mo"
+        } else {
+            perMonthText = nil
+        }
+        
+        let badgeText: String?
+        if plan.kind == .yearly {
+            // Monthly is €6.99 × 12 = €83.88
+            // Yearly is €14.99
+            // Savings: (83.88 - 14.99) / 83.88 = 82%
+            badgeText = "82% OFF"
+        } else {
+            badgeText = nil
+        }
+        
+        return selectablePricingCard(
             planLabel: plan.label,
             subtitle: plan.subtitle,
             price: plan.priceText,
             highlight: plan.highlight,
             index: index,
-            perMonthText: nil,
-            badgeText: nil
+            perMonthText: perMonthText,
+            badgeText: badgeText
         )
     }
 
@@ -846,7 +871,7 @@ struct PaywallView: View {
 
         return selectablePricingCard(
             planLabel: planLabel,
-            subtitle: packageSubtitle(for: package),
+            subtitle: "", // No subtitle
             price: package.localizedPriceString,
             highlight: highlight,
             index: index,
@@ -899,34 +924,31 @@ struct PaywallView: View {
                     }
                     
                 VStack(alignment: .leading, spacing: isYearlyPlan ? 6 : 2) {
-                        Text(planLabel)
+                    Text(planLabel)
                         .font(.system(.subheadline, design: .rounded))
                         .fontWeight(.semibold)
                         .foregroundColor(.primary)
                     
+                    // For yearly, show price below the title
                     if isYearlyPlan {
                         Text(price)
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                             .foregroundColor(.primary)
-                    } else if !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 
+                // Show per month text on the right
                 if let perMonthText {
                     Text(perMonthText)
                         .font(.footnote)
                         .fontWeight(.medium)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.trailing)
-                        .frame(minWidth: 68)
-                        .padding(.vertical, isYearlyPlan ? 8 : 6)
+                        .padding(.vertical, 4)
                 }
             }
-            .padding(.vertical, isYearlyPlan ? 18 : 15)
+            .padding(.vertical, isYearlyPlan ? 18 : 16)
             .padding(.horizontal, 20)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -941,8 +963,6 @@ struct PaywallView: View {
                 Group {
                     if let badgeText {
                         badgeLabel(text: badgeText)
-                    } else if highlight {
-                        badgeLabel(text: "Steal deal")
                     }
                 }
             )
@@ -1328,24 +1348,40 @@ struct PaywallView: View {
     }
     
     private func perMonthText(for package: Package, displayAlways: Bool = false) -> String? {
-        guard displayAlways || planKind(for: package) != .monthly,
-              let value = perMonthPrice(for: package) else { return nil }
-        let formatter = currencyFormatter(for: package)
-        let formatted = formatter.string(from: NSDecimalNumber(decimal: value))
-        return formatted.map { "\($0)/mo" }
+        let kind = planKind(for: package)
+        
+        // For monthly, show price/mo
+        if kind == .monthly {
+            return "\(package.localizedPriceString)/mo"
+        }
+        
+        // For yearly, calculate and show per month
+        if kind == .yearly, let value = perMonthPrice(for: package) {
+            let formatter = currencyFormatter(for: package)
+            let formatted = formatter.string(from: NSDecimalNumber(decimal: value))
+            return formatted.map { "\($0)/mo" }
+        }
+        
+        return nil
     }
     
     private func discountBadgeText(for package: Package) -> String? {
         guard planKind(for: package) == .yearly,
-              let baseline = monthlyPackage.flatMap({ perMonthPrice(for: $0) }),
-              let perMonth = perMonthPrice(for: package) else { return nil }
+              let monthlyPkg = monthlyPackage else { return nil }
         
-        let baselineValue = NSDecimalNumber(decimal: baseline).doubleValue
-        let perMonthValue = NSDecimalNumber(decimal: perMonth).doubleValue
-        guard baselineValue > 0, perMonthValue < baselineValue else { return nil }
+        // Calculate annual cost if paid monthly
+        let monthlyPrice = NSDecimalNumber(decimal: monthlyPkg.storeProduct.price).doubleValue
+        let annualIfMonthly = monthlyPrice * 12
         
-        let discount = 1 - (perMonthValue / baselineValue)
+        // Get yearly price
+        let yearlyPrice = NSDecimalNumber(decimal: package.storeProduct.price).doubleValue
+        
+        guard annualIfMonthly > yearlyPrice else { return nil }
+        
+        // Calculate discount percentage
+        let discount = (annualIfMonthly - yearlyPrice) / annualIfMonthly
         let percent = Int((discount * 100).rounded())
+        
         return percent >= 5 ? "\(percent)% OFF" : nil
     }
     
@@ -1414,35 +1450,16 @@ struct PaywallView: View {
             Developer: NoteWall Team
             """
         case .privacyPolicy:
+            // Privacy Policy is hosted on Notion - open URL
+            DispatchQueue.main.async {
+                if let url = URL(string: "https://peat-appendix-c3c.notion.site/PRIVACY-POLICY-2b7f6a63758f804cab16f58998d7787e?source=copy_link") {
+                    UIApplication.shared.open(url)
+                }
+            }
             return """
-            Privacy Policy
+            Opening Privacy Policy...
             
-            Last Updated: November 13, 2025
-            
-            1. Information We Collect
-            
-            • Notes and text you create (stored locally on your device only)
-            • Photos you select for wallpapers (processed locally)
-            • Device information for app compatibility
-            • Anonymous performance data to improve the app
-            
-            2. How We Use Information
-            
-            • Provide wallpaper generation functionality
-            • Process in-app purchases through Apple's App Store
-            • Improve app performance and fix bugs
-            • Provide customer support
-            
-            3. Data Storage
-            
-            • All personal content is stored locally on your device
-            • We do not upload your personal content to external servers
-            • Your data remains private and under your control
-            
-            4. Contact
-            
-            Email: iosnotewall@gmail.com
-            Developer: NoteWall Team
+            Your browser will open with the Privacy Policy.
             """
         case .termsAndPrivacy:
             return """

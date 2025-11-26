@@ -23,6 +23,7 @@
 		A1000007000000000000001 /* WallpaperRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000007000000000000001 /* WallpaperRenderer.swift */; };
 		A1000008000000000000001 /* PhotoSaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000008000000000000001 /* PhotoSaver.swift */; };
 		A1000009000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000009000000000000001 /* Assets.xcassets */; };
+		A1000010000000000000001 /* WallpaperUpdateLoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011000000000000001 /* WallpaperUpdateLoadingView.swift */; };
 		B1000001000000000000001 /* HomeScreenImageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001000000000000001 /* HomeScreenImageManager.swift */; };
 		B1000002000000000000001 /* HomeScreenPhotoPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002000000000000001 /* HomeScreenPhotoPickerView.swift */; };
 		C1000001000000000000001 /* PaywallManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000001000000000000001 /* PaywallManager.swift */; };
@@ -50,6 +51,7 @@
 		A2000008000000000000001 /* PhotoSaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSaver.swift; sourceTree = "<group>"; };
 		A2000009000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000010000000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A2000011000000000000001 /* WallpaperUpdateLoadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WallpaperUpdateLoadingView.swift; sourceTree = "<group>"; };
 		A3000001000000000000001 /* NoteWall.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NoteWall.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2000001000000000000001 /* HomeScreenImageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeScreenImageManager.swift; sourceTree = "<group>"; };
 		B2000002000000000000001 /* HomeScreenPhotoPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeScreenPhotoPickerView.swift; sourceTree = "<group>"; };
@@ -104,6 +106,7 @@
 				A2000006000000000000001 /* MainTabView.swift */,
 				A2000007000000000000001 /* WallpaperRenderer.swift */,
 				A2000008000000000000001 /* PhotoSaver.swift */,
+				A2000011000000000000001 /* WallpaperUpdateLoadingView.swift */,
 				B2000001000000000000001 /* HomeScreenImageManager.swift */,
 				B2000002000000000000001 /* HomeScreenPhotoPickerView.swift */,
 				C2000001000000000000001 /* PaywallManager.swift */,
@@ -213,6 +216,7 @@
 				A1000006000000000000001 /* MainTabView.swift in Sources */,
 				A1000007000000000000001 /* WallpaperRenderer.swift in Sources */,
 				A1000008000000000000001 /* PhotoSaver.swift in Sources */,
+				A1000010000000000000001 /* WallpaperUpdateLoadingView.swift in Sources */,
 				B1000001000000000000001 /* HomeScreenImageManager.swift in Sources */,
 				B1000002000000000000001 /* HomeScreenPhotoPickerView.swift in Sources */,
 				C1000001000000000000001 /* PaywallManager.swift in Sources */,

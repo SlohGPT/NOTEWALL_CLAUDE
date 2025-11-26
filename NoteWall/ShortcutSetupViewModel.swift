@@ -96,10 +96,10 @@ final class ShortcutSetupViewModel: ObservableObject {
             self.shortcutURL = URL(string: urlString)
         } else {
             // Default shortcut URL (local/Xcode build)
-            self.shortcutURL = URL(string: "https://www.icloud.com/shortcuts/5c43e6ec791e4a90b8172bda31243e5c")
+            self.shortcutURL = URL(string: "https://www.icloud.com/shortcuts/37aa5bd3a1274af1b502c8eeda60fbf7")
         }
         
-        // Note: TestFlight builds will use: https://www.icloud.com/shortcuts/1c815657ac7c446a996d505032471cea
+        // Note: Both production and TestFlight builds now use: https://www.icloud.com/shortcuts/37aa5bd3a1274af1b502c8eeda60fbf7
         // This shortcut is configured to automatically use "Wallpaper 2" (Index 1, first user wallpaper)
         // which works for all users regardless of how many wallpapers they have
         

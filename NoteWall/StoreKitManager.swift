@@ -10,13 +10,16 @@ class StoreKitManager: ObservableObject {
     // MARK: - Product IDs
     // Product IDs from App Store Connect
     enum ProductID: String, CaseIterable {
-        case monthlySubscription = "com.iosnotewall.notewall.monthly"
-        case lifetimePurchase = "com.iosnotewall.notewall.lifetime"
+        case monthlySubscription = "monthly"
+        case yearlySubscription = "yearly"
+        case lifetimePurchase = "lifetime"
         
         var displayName: String {
             switch self {
             case .monthlySubscription:
                 return "Monthly Subscription"
+            case .yearlySubscription:
+                return "Yearly Subscription"
             case .lifetimePurchase:
                 return "Lifetime Access"
             }
@@ -58,8 +61,14 @@ class StoreKitManager: ObservableObject {
             
             await MainActor.run {
                 self.products = loadedProducts.sorted { product1, product2 in
-                    // Sort: monthly subscription first, then lifetime
+                    // Sort: monthly, then yearly, then lifetime
                     if product1.id == ProductID.monthlySubscription.rawValue {
+                        return true
+                    }
+                    if product2.id == ProductID.monthlySubscription.rawValue {
+                        return false
+                    }
+                    if product1.id == ProductID.yearlySubscription.rawValue {
                         return true
                     }
                     return false
@@ -214,9 +223,13 @@ class StoreKitManager: ObservableObject {
         await MainActor.run {
             if product.id == ProductID.lifetimePurchase.rawValue {
                 PaywallManager.shared.grantLifetimeAccess()
+            } else if product.id == ProductID.yearlySubscription.rawValue {
+                // Grant subscription for 1 year + 7 days trial
+                let expiryDate = Calendar.current.date(byAdding: .day, value: 372, to: Date()) ?? Date()
+                PaywallManager.shared.grantSubscription(expiryDate: expiryDate)
             } else if product.id == ProductID.monthlySubscription.rawValue {
-                // Grant subscription for 1 month + 5 days trial
-                let expiryDate = Calendar.current.date(byAdding: .day, value: 35, to: Date()) ?? Date()
+                // Grant subscription for 1 month + 7 days trial
+                let expiryDate = Calendar.current.date(byAdding: .day, value: 37, to: Date()) ?? Date()
                 PaywallManager.shared.grantSubscription(expiryDate: expiryDate)
             }
         }

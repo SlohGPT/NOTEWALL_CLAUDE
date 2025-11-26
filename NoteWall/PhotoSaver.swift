@@ -1,8 +1,21 @@
 import UIKit
 import Photos
+import SwiftUI
 
 struct PhotoSaver {
     static func saveImage(_ image: UIImage, completion: @escaping (Bool, String?) -> Void) {
+        // Check if user wants to save to Photos library
+        let saveToPhotos = UserDefaults.standard.bool(forKey: "saveWallpapersToPhotos")
+        
+        if !saveToPhotos {
+            // User opted to skip Photos library - return success without saving
+            print("📸 PhotoSaver: Skipping Photos library save (user preference)")
+            DispatchQueue.main.async {
+                completion(true, nil)
+            }
+            return
+        }
+        
         // Check authorization status
         let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
 
@@ -35,6 +48,18 @@ struct PhotoSaver {
     }
     
     static func deleteAsset(withIdentifier identifier: String, completion: @escaping (Bool) -> Void) {
+        // Check if user wants to save to Photos library
+        let saveToPhotos = UserDefaults.standard.bool(forKey: "saveWallpapersToPhotos")
+        
+        if !saveToPhotos {
+            // User opted to skip Photos library - nothing to delete
+            print("🗑️ PhotoSaver: Skipping deletion (user preference - not saving to Photos)")
+            DispatchQueue.main.async {
+                completion(true)
+            }
+            return
+        }
+        
         // Always request permission to ensure the system dialog shows
         // This is important for user awareness, even if permission was previously granted
         PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in

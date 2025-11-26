@@ -23,6 +23,7 @@ private enum OnboardingPage: Int, CaseIterable, Hashable {
     case addNotes
     case chooseWallpapers
     case allowPermissions
+    case storagePreferences
     case overview
 }
 
@@ -40,6 +41,9 @@ struct OnboardingView: View {
     @AppStorage("homeScreenPresetSelection") private var homeScreenPresetSelectionRaw = ""
     @AppStorage("homeScreenUsesCustomPhoto") private var homeScreenUsesCustomPhoto = false
     @AppStorage("savedNotes") private var savedNotesData: Data = Data()
+    @AppStorage("saveWallpapersToPhotos") private var saveWallpapersToPhotos = false
+    @AppStorage("autoUpdateWallpaperAfterDeletion") private var autoUpdateWallpaperAfterDeletionRaw: String = ""
+    @AppStorage("hasShownAutoUpdatePrompt") private var hasShownAutoUpdatePrompt = false
     @State private var didOpenShortcut = false
     @State private var isSavingHomeScreenPhoto = false
     @State private var homeScreenStatusMessage: String?
@@ -71,8 +75,8 @@ struct OnboardingView: View {
     @State private var currentNoteText = ""
     @FocusState private var isNoteFieldFocused: Bool
 
-    private let shortcutURL = "https://www.icloud.com/shortcuts/5c43e6ec791e4a90b8172bda31243e5c"
-    private let testFlightShortcutURL = "https://www.icloud.com/shortcuts/1c815657ac7c446a996d505032471cea"
+    private let shortcutURL = "https://www.icloud.com/shortcuts/37aa5bd3a1274af1b502c8eeda60fbf7"
+    private let testFlightShortcutURL = "https://www.icloud.com/shortcuts/37aa5bd3a1274af1b502c8eeda60fbf7"
     
     // Detect if running from TestFlight
     private var isTestFlightBuild: Bool {
@@ -224,6 +228,8 @@ struct OnboardingView: View {
                         chooseWallpapersStep(includePhotoPicker: includePhotoPicker)
                     case .allowPermissions:
                         allowPermissionsStep()
+                    case .storagePreferences:
+                        storagePreferencesStep()
                     case .overview:
                         overviewStep()
                     }
@@ -522,6 +528,9 @@ struct OnboardingView: View {
                                 }
                             
                             Button(action: {
+                                // Light impact haptic for adding note button
+                                let generator = UIImpactFeedbackGenerator(style: .light)
+                                generator.impactOccurred()
                                 addCurrentNote(scrollProxy: proxy)
                             }) {
                                 Image(systemName: "plus.circle.fill")
@@ -640,6 +649,179 @@ struct OnboardingView: View {
             prepareNotificationsVideoPlayerIfNeeded()
         }
     }
+    
+    private func storagePreferencesStep() -> some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 28) {
+                VStack(spacing: 16) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 60, weight: .semibold))
+                        .foregroundColor(.appAccent)
+                        .padding(.top, 8)
+                    
+                    Text("Choose Your Workflow")
+                        .font(.system(.largeTitle, design: .rounded))
+                        .fontWeight(.bold)
+                        .multilineTextAlignment(.center)
+                    
+                    Text("How would you like NoteWall to handle wallpaper updates when you delete notes?")
+                        .font(.system(.body))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 12)
+                }
+                
+                VStack(spacing: 16) {
+                    // Option 1: Automatic (RECOMMENDED)
+                    storageOptionCard(
+                        isSelected: !saveWallpapersToPhotos,
+                        title: "Automatic",
+                        subtitle: "Recommended for seamless experience",
+                        description: "When you delete notes, your wallpaper updates automatically. Zero popups, clean Photos library.",
+                        icon: "bolt.fill",
+                        benefits: [
+                            "Wallpaper auto-updates when deleting notes",
+                            "No popups or confirmations",
+                            "Photos library stays clean", 
+                            "Saves to Files app only"
+                        ]
+                    ) {
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                        withAnimation {
+                            saveWallpapersToPhotos = false
+                            autoUpdateWallpaperAfterDeletionRaw = "true"
+                        }
+                    }
+                    
+                    // Option 2: Manual
+                    storageOptionCard(
+                        isSelected: saveWallpapersToPhotos,
+                        title: "Manual",
+                        subtitle: "Full control over updates",
+                        description: "You decide when to update your wallpaper. Wallpapers saved to Photos library for easy sharing.",
+                        icon: "hand.tap.fill",
+                        benefits: [
+                            "Manual wallpaper updates only",
+                            "Full control over each update",
+                            "Wallpapers visible in Photos app",
+                            "Can share or edit in Photos"
+                        ]
+                    ) {
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                        withAnimation {
+                            saveWallpapersToPhotos = true
+                            autoUpdateWallpaperAfterDeletionRaw = "false"
+                        }
+                    }
+                }
+                
+                // Info box
+                HStack(spacing: 12) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.appAccent)
+                    
+                    Text("You can change this anytime in Settings")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 36)
+        }
+        .scrollAlwaysBounceIfAvailable()
+    }
+    
+    private func storageOptionCard(
+        isSelected: Bool,
+        title: String,
+        subtitle: String,
+        description: String,
+        icon: String,
+        benefits: [String],
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 12) {
+                    Image(systemName: icon)
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundColor(isSelected ? .appAccent : .secondary)
+                        .frame(width: 40, height: 40)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(title)
+                                .font(.system(.title3, design: .rounded))
+                                .fontWeight(.bold)
+                            
+                            if title == "Files Only" {
+                                Text("⭐")
+                                    .font(.caption)
+                            }
+                            
+                            Spacer()
+                            
+                            // Checkmark circle
+                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundColor(isSelected ? .appAccent : .secondary.opacity(0.3))
+                        }
+                        
+                        Text(subtitle)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(isSelected ? .appAccent : .secondary)
+                    }
+                }
+                
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                
+                Divider()
+                    .padding(.vertical, 4)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(benefits, id: \.self) { benefit in
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(isSelected ? .appAccent : .secondary.opacity(0.6))
+                            
+                            Text(benefit)
+                                .font(.footnote)
+                                .foregroundColor(isSelected ? .primary : .secondary)
+                        }
+                    }
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(isSelected ? Color.appAccent.opacity(0.08) : Color(.secondarySystemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(
+                                isSelected ? Color.appAccent.opacity(0.5) : Color.clear,
+                                lineWidth: 2
+                            )
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
 
     @ViewBuilder
     private func chooseWallpapersStep(includePhotoPicker: Bool) -> some View {
@@ -654,6 +836,10 @@ struct OnboardingView: View {
                     
                     // Edit Notes button to go back to step 2
                     Button(action: {
+                        // Light impact haptic for edit notes button
+                        let generator = UIImpactFeedbackGenerator(style: .light)
+                        generator.impactOccurred()
+                        
                         withAnimation(.easeInOut(duration: 0.3)) {
                             currentPage = .addNotes
                         }
@@ -839,6 +1025,8 @@ struct OnboardingView: View {
             return isLaunchingShortcut ? "Launching Shortcut…" : "Next"
         case .allowPermissions:
             return "Continue"
+        case .storagePreferences:
+            return "Continue"
         case .installShortcut:
             return didOpenShortcut ? "Next" : "Install"
         case .addNotes:
@@ -856,6 +1044,8 @@ struct OnboardingView: View {
             return isLaunchingShortcut ? nil : "paintbrush.pointed.fill"
         case .allowPermissions:
             return "checkmark.shield.fill"
+        case .storagePreferences:
+            return "folder.fill"
         case .installShortcut:
             return "bolt.fill"
         case .addNotes:
@@ -872,6 +1062,8 @@ struct OnboardingView: View {
         case .addNotes:
             return !onboardingNotes.isEmpty
         case .allowPermissions:
+            return true
+        case .storagePreferences:
             return true
         case .chooseWallpapers:
             let hasHomeSelection = homeScreenUsesCustomPhoto || !homeScreenPresetSelectionRaw.isEmpty
@@ -939,6 +1131,8 @@ struct OnboardingView: View {
         case .chooseWallpapers:
             startShortcutLaunch()
         case .allowPermissions:
+            advanceStep()
+        case .storagePreferences:
             advanceStep()
         case .overview:
             completeOnboarding()
@@ -1141,6 +1335,15 @@ struct OnboardingView: View {
         hasCompletedSetup = true
         completedOnboardingVersion = onboardingVersion
         shouldShowTroubleshootingBanner = true // Show troubleshooting banner on home screen
+        hasShownAutoUpdatePrompt = true // Mark as shown since user chose preference in onboarding
+        
+        // Ensure auto-update preference is set based on user's choice in step 6
+        // If they haven't explicitly set it (which they should have), set it now
+        if autoUpdateWallpaperAfterDeletionRaw.isEmpty {
+            // Default to automatic if Files Only was chosen, manual if Photos Library
+            autoUpdateWallpaperAfterDeletionRaw = saveWallpapersToPhotos ? "false" : "true"
+        }
+        
         NotificationCenter.default.post(name: .onboardingCompleted, object: nil)
         
         isPresented = false
@@ -1816,6 +2019,8 @@ private extension OnboardingPage {
             return "Add Notes"
         case .allowPermissions:
             return "Allow Permissions"
+        case .storagePreferences:
+            return "Storage Preferences"
         case .chooseWallpapers:
             return "Choose Wallpapers"
         case .overview:
@@ -1835,6 +2040,8 @@ private extension OnboardingPage {
             return "Choose Wallpapers"
         case .allowPermissions:
             return "Allow Permissions"
+        case .storagePreferences:
+            return "Storage Options"
         case .overview:
             return "All Set"
         }
@@ -1843,17 +2050,19 @@ private extension OnboardingPage {
     var accessibilityLabel: String {
         switch self {
         case .welcome:
-            return "Step 0"
-        case .installShortcut:
             return "Step 1"
-        case .addNotes:
+        case .installShortcut:
             return "Step 2"
+        case .addNotes:
+            return "Step 3"
         case .chooseWallpapers:
             return "Step 4"
         case .allowPermissions:
             return "Step 5"
-        case .overview:
+        case .storagePreferences:
             return "Step 6"
+        case .overview:
+            return "Step 7"
         }
     }
 }
