@@ -231,6 +231,15 @@ final class PIPVideoPlayerManager: NSObject, ObservableObject {
             return false
         }
         
+        // Ensure player is playing before we check PiP readiness. Some iOS versions
+        // won't mark PiP as possible until playback has actually started.
+        if let player = player, player.rate == 0 {
+            print("⚠️ PIPVideoPlayerManager: Player not playing, starting playback")
+            player.play()
+        }
+
+        // If PiP isn't possible yet, give the system a brief moment to update after
+        // starting playback and try one more time before failing.
         guard controller.isPictureInPicturePossible else {
             print("❌ PIPVideoPlayerManager: PiP is not possible at this time")
             print("   - Player ready: \(isReadyToPlay)")
@@ -239,15 +248,25 @@ final class PIPVideoPlayerManager: NSObject, ObservableObject {
                 print("   - Layer in superlayer: \(layer.superlayer != nil)")
                 print("   - Layer frame: \(layer.frame)")
             }
+
+            // Retry shortly after kicking playback just in case the PiP controller
+            // needed the player to be actively rendering.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard
+                    let self,
+                    let retryController = self.pipController,
+                    retryController.isPictureInPicturePossible
+                else {
+                    return
+                }
+
+                print("🔁 PIPVideoPlayerManager: Retrying PiP start after playback began")
+                retryController.startPictureInPicture()
+            }
+
             return false
         }
-        
-        // Ensure player is playing - some iOS versions require this
-        if let player = player, player.rate == 0 {
-            print("⚠️ PIPVideoPlayerManager: Player not playing, starting playback")
-            player.play()
-        }
-        
+
         controller.startPictureInPicture()
         print("✅ PIPVideoPlayerManager: Picture-in-Picture started")
         return true
